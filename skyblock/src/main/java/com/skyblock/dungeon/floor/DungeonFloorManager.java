@@ -2,6 +2,7 @@ package com.skyblock.dungeon.floor;
 
 import com.skyblock.dungeon.config.FloorTheme;
 import com.skyblock.dungeon.config.FloorThemeRegistry;
+import com.skyblock.dungeon.gen.DungeonCarveScheduler;
 import com.skyblock.dungeon.gen.DungeonRoom;
 import com.skyblock.dungeon.gen.DungeonRoomPlanner;
 import com.skyblock.dungeon.gen.RoomGraph;
@@ -40,6 +41,7 @@ public final class DungeonFloorManager {
     private final BossKillTracker bossKillTracker = new BossKillTracker();
     private final Logger logger;
     private final java.util.Random random;
+    private final DungeonCarveScheduler carveScheduler;
 
     /** Floor 1's origin XZ - every subsequent floor shares the same XZ, stacked directly below. */
     private final double floor1OriginX;
@@ -53,7 +55,7 @@ public final class DungeonFloorManager {
 
     public DungeonFloorManager(World dungeonWorld, FloorBounds floorBounds, FloorThemeRegistry themeRegistry,
                                 double floor1OriginX, double floor1OriginZ,
-                                Logger logger, java.util.Random random) {
+                                Logger logger, java.util.Random random, DungeonCarveScheduler carveScheduler) {
         this.dungeonWorld = dungeonWorld;
         this.floorBounds = floorBounds;
         this.themeRegistry = themeRegistry;
@@ -61,6 +63,7 @@ public final class DungeonFloorManager {
         this.floor1OriginZ = floor1OriginZ;
         this.logger = logger;
         this.random = random;
+        this.carveScheduler = carveScheduler;
 
         // Floor 1 is the only floor open at the start of the week.
         unlockedFloors.add(1);
@@ -107,6 +110,18 @@ public final class DungeonFloorManager {
 
         DungeonRoom bossRoom = planner.registerBossRoom(x, z, radiusX, radiusZ);
         bossRooms.put(floorNumber, bossRoom);
+
+        // Queue the boss room's own footprint for carving right now,
+        // urgent priority, independent of any player's position. Boss
+        // rooms used to only get carved incidentally whenever a
+        // player's ordinary frontier radius happened to sweep over
+        // them - a player who reached the boss room's XZ bounds before
+        // that had happened would trigger DungeonBossRoomTrigger with
+        // no open column to spawn into, and the boss would silently
+        // never spawn. This guarantees the room is carved (or already
+        // mid-carve, a few ticks out) well before anyone can walk there.
+        planner.enqueueBossRoomAreaUrgent(dungeonWorld, bossRoom);
+
         logger.info("[Dungeon] Floor " + floorNumber + " boss room placed at (" + x + ", " + z + ").");
     }
 
@@ -142,7 +157,7 @@ public final class DungeonFloorManager {
         return planners.computeIfAbsent(floorNumber, f -> {
             RoomGraph graph = getOrCreateRoomGraph(f);
             FloorTheme theme = themeRegistry.getTheme(f);
-            DungeonRoomPlanner planner = new DungeonRoomPlanner(graph, floorBounds, f, floor1OriginX, floor1OriginZ, theme, logger, random);
+            DungeonRoomPlanner planner = new DungeonRoomPlanner(graph, floorBounds, f, floor1OriginX, floor1OriginZ, theme, logger, random, carveScheduler);
             if (globalCarveListener != null) {
                 planner.setRoomCarveListener(globalCarveListener);
             }

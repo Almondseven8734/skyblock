@@ -53,6 +53,7 @@ import com.skyblock.dungeon.floor.DungeonPlayerState;
 import com.skyblock.dungeon.floor.DungeonPlayerStateStorage;
 import com.skyblock.dungeon.floor.DungeonResetScheduler;
 import com.skyblock.dungeon.floor.DungeonStaircaseOrchestrator;
+import com.skyblock.dungeon.gen.DungeonCarveScheduler;
 import com.skyblock.dungeon.gen.DungeonWorldGenerator;
 import com.skyblock.dungeon.listener.DungeonBlockProtectionListener;
 import com.skyblock.dungeon.listener.DungeonChestLootListener;
@@ -93,6 +94,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 public class SkyblockPlugin extends JavaPlugin {
 
     private DungeonResetScheduler dungeonResetScheduler;
+    private DungeonCarveScheduler dungeonCarveScheduler;
 
     @Override
     public void onEnable() {
@@ -221,9 +223,18 @@ public class SkyblockPlugin extends JavaPlugin {
             FloorThemeRegistry dungeonThemeRegistry = new FloorThemeRegistry();
             java.util.Random dungeonRandom = new java.util.Random();
 
+            // Ticks a bounded number of chunk carves per server tick instead
+            // of letting frontier/staircase events carve dozens of chunks
+            // synchronously in one go - see DungeonCarveScheduler's class
+            // doc for the watchdog-crash story this fixes. Must be started
+            // before anything can call planAndCarveNear/registerBossRoom.
+            DungeonCarveScheduler dungeonCarveSchedulerLocal = new DungeonCarveScheduler();
+            dungeonCarveSchedulerLocal.start(this);
+            this.dungeonCarveScheduler = dungeonCarveSchedulerLocal;
+
             DungeonFloorManager dungeonFloorManager = new DungeonFloorManager(
                 dungeonWorld, dungeonFloorBounds, dungeonThemeRegistry,
-                floor1OriginX, floor1OriginZ, getLogger(), dungeonRandom
+                floor1OriginX, floor1OriginZ, getLogger(), dungeonRandom, dungeonCarveSchedulerLocal
             );
 
             DungeonStaircaseOrchestrator dungeonStaircaseOrchestrator =
@@ -471,6 +482,9 @@ public class SkyblockPlugin extends JavaPlugin {
     public void onDisable() {
         if (dungeonResetScheduler != null) {
             dungeonResetScheduler.cancel();
+        }
+        if (dungeonCarveScheduler != null) {
+            dungeonCarveScheduler.stop();
         }
         getLogger().info("[SkyblockPlugin] Plugin disabled.");
     }

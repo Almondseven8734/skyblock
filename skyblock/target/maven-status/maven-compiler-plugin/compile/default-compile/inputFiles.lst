@@ -47,6 +47,7 @@
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/floor/DungeonWorldNameStore.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/floor/StaircasePlacementValidator.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/gen/DungeonBossRoomGeometry.java
+/workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/gen/DungeonCarveScheduler.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/gen/DungeonCorridor.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/gen/DungeonRoom.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/gen/DungeonRoomPlanner.java

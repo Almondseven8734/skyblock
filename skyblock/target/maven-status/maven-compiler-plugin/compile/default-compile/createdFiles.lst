@@ -44,6 +44,7 @@ com/skyblock/dungeon/loot/DungeonLootTable.class
 com/skyblock/dungeon/drops/DungeonDropRegistry.class
 com/skyblock/dungeon/items/DungeonItemGenerator.class
 com/skyblock/dungeon/config/FloorTheme.class
+com/skyblock/dungeon/gen/DungeonCarveScheduler$Job.class
 com/skyblock/tpa/TpaSystem$TpaRequest.class
 com/skyblock/ah/AhStorage.class
 com/skyblock/island/IslandCommands$4.class
@@ -129,6 +130,7 @@ com/skyblock/dungeon/classes/ClassCommand.class
 com/skyblock/island/IslandCommands$2.class
 com/skyblock/admin/AdminSystem.class
 com/skyblock/island/IslandCommands.class
+com/skyblock/dungeon/gen/DungeonCarveScheduler.class
 com/skyblock/util/NameValidator$Result.class
 com/skyblock/dungeon/gen/RoomGraph.class
 com/skyblock/dungeon/util/FloorBounds.class

@@ -49,6 +49,18 @@ public final class DungeonBossRoomTrigger {
     private static final long MILESTONE_BOSS_TICK_PERIOD = 10L;
     /** Random tries at finding a verified-open column before falling back to a full scan. */
     private static final int MAX_LOCATE_ATTEMPTS = 20;
+    /**
+     * How many times to retry spawning a boss whose room isn't carved
+     * yet before giving up and logging a warning. Boss room chunks are
+     * enqueued urgent-priority the moment the room is registered (see
+     * DungeonRoomPlanner.enqueueBossRoomAreaUrgent), so under normal
+     * play this resolves within the first retry or two; this only
+     * matters for the rare case of a player reaching the room in the
+     * same tick or two it was registered in (e.g. an admin teleport).
+     */
+    private static final int MAX_SPAWN_RETRIES = 10;
+    /** Ticks between spawn retries. */
+    private static final long SPAWN_RETRY_DELAY_TICKS = 20L;
 
     /** Extra multiplier applied on top of a boss's rolled-level scaling, so a boss always hits harder than an ambient mob of the same level. */
     private static final double BOSS_BONUS_MULTIPLIER = 2.5;
@@ -109,36 +121,64 @@ public final class DungeonBossRoomTrigger {
     private void spawnBosses(World world, int floorNumber, int floorBottomY, DungeonRoom bossRoom) {
         FloorTheme theme = themeRegistry.getTheme(floorNumber);
         int bossCount = theme.getBossCount();
-        MilestoneBossFactory factory = theme.isMilestoneFloor() ? milestoneFactories.get(floorNumber) : null;
 
         for (int i = 0; i < bossCount; i++) {
-            Location spawnLoc = randomPointInRoom(world, bossRoom, floorBottomY);
-            if (spawnLoc == null) {
-                continue; // no verified-open column in this boss room (yet) - skip rather than embed the boss
+            spawnOneBossWithRetry(world, floorNumber, floorBottomY, bossRoom, theme, 0);
+        }
+    }
+
+    /**
+     * Attempts to spawn a single boss, retrying a bounded number of
+     * times a few ticks apart if the room isn't fully carved yet.
+     * Previously a null spawnLoc (no open column found) just silently
+     * `continue`d and the boss never spawned at all - with no log line
+     * and nothing telling anyone why. DungeonRoomPlanner now enqueues a
+     * boss room's chunks as soon as it's registered (see
+     * enqueueBossRoomAreaUrgent), so in the overwhelming majority of
+     * cases the room is already carved by the time a player can walk
+     * there and this succeeds on the first attempt; the retry loop is
+     * just a safety net for the rare race, not the primary fix.
+     */
+    private void spawnOneBossWithRetry(World world, int floorNumber, int floorBottomY, DungeonRoom bossRoom,
+                                        FloorTheme theme, int attemptNumber) {
+        Location spawnLoc = randomPointInRoom(world, bossRoom, floorBottomY);
+        if (spawnLoc == null) {
+            if (attemptNumber >= MAX_SPAWN_RETRIES) {
+                plugin.getLogger().warning("[Dungeon] Floor " + floorNumber + " boss room at ("
+                        + bossRoom.centerX() + ", " + bossRoom.centerZ() + ") still has no open column after "
+                        + MAX_SPAWN_RETRIES + " retries - a boss failed to spawn. Allowing the room to "
+                        + "re-trigger on next entry.");
+                triggeredRooms.remove(bossRoom.id());
+                return;
             }
-            EntityType type = pickBossEntityType(theme);
+            plugin.getServer().getScheduler().runTaskLater(plugin,
+                    () -> spawnOneBossWithRetry(world, floorNumber, floorBottomY, bossRoom, theme, attemptNumber + 1),
+                    SPAWN_RETRY_DELAY_TICKS);
+            return;
+        }
 
-            if (!(world.spawnEntity(spawnLoc, type) instanceof LivingEntity entity)) {
-                continue;
-            }
+        EntityType type = pickBossEntityType(theme);
+        if (!(world.spawnEntity(spawnLoc, type) instanceof LivingEntity entity)) {
+            return;
+        }
 
-            orchestrator.registerBoss(entity.getUniqueId(), floorNumber);
-            gateController.registerBoss(entity.getUniqueId(), floorNumber, bossRoom);
+        orchestrator.registerBoss(entity.getUniqueId(), floorNumber);
+        gateController.registerBoss(entity.getUniqueId(), floorNumber, bossRoom);
 
-            // Level treatment always applies first (stats, tier buffs, gear,
-            // name-tag, PDC level tag) so a milestone boss's phase-threshold
-            // math below reads its true, final max health - the scripted
-            // factory only layers ability/phase logic on top, it never
-            // re-touches the base stats.
-            int level = levelRoller.rollBossLevel(floorNumber);
-            levelApplicator.applyLevel(entity, level, BOSS_BONUS_MULTIPLIER);
-            levelApplicator.tagBoss(entity);
-            hookCustomAi(entity);
+        // Level treatment always applies first (stats, tier buffs, gear,
+        // name-tag, PDC level tag) so a milestone boss's phase-threshold
+        // math below reads its true, final max health - the scripted
+        // factory only layers ability/phase logic on top, it never
+        // re-touches the base stats.
+        int level = levelRoller.rollBossLevel(floorNumber);
+        levelApplicator.applyLevel(entity, level, BOSS_BONUS_MULTIPLIER);
+        levelApplicator.tagBoss(entity);
+        hookCustomAi(entity);
 
-            if (factory != null) {
-                MilestoneBoss boss = factory.create(plugin, entity, floorNumber);
-                plugin.getServer().getScheduler().runTaskTimer(plugin, boss::update, 0L, MILESTONE_BOSS_TICK_PERIOD);
-            }
+        MilestoneBossFactory factory = theme.isMilestoneFloor() ? milestoneFactories.get(floorNumber) : null;
+        if (factory != null) {
+            MilestoneBoss boss = factory.create(plugin, entity, floorNumber);
+            plugin.getServer().getScheduler().runTaskTimer(plugin, boss::update, 0L, MILESTONE_BOSS_TICK_PERIOD);
         }
     }
 

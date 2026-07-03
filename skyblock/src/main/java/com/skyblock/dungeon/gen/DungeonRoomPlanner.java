@@ -71,13 +71,21 @@ public final class DungeonRoomPlanner {
     private final Logger logger;
     private final Random random;
     private final CaveNoise noise;
+    private final DungeonCarveScheduler carveScheduler;
 
-    /** Chunk keys (chunkX<<32|chunkZ long) that have been carved already. */
+    /**
+     * Chunk keys (chunkX<<32|chunkZ long) that have been carved OR are
+     * already queued to be carved. Gating on enqueue (not just on
+     * actual carve) is what stops onPlayerFrontier - which fires on
+     * every whole-block move - from re-enqueuing the same chunk
+     * hundreds of times while it's still sitting in the scheduler's
+     * queue waiting its turn.
+     */
     private final Set<Long> carvedChunks = ConcurrentHashMap.newKeySet();
 
     public DungeonRoomPlanner(RoomGraph graph, FloorBounds floorBounds, int floorNumber,
                                double originX, double originZ, FloorTheme theme,
-                               Logger logger, Random random) {
+                               Logger logger, Random random, DungeonCarveScheduler carveScheduler) {
         this.graph       = graph;
         this.floorBounds = floorBounds;
         this.floorNumber = floorNumber;
@@ -86,6 +94,7 @@ public final class DungeonRoomPlanner {
         this.theme       = theme;
         this.logger      = logger;
         this.random      = random;
+        this.carveScheduler = carveScheduler;
         // Seed noise from the floor number so each floor feels different.
         this.noise       = new CaveNoise(floorNumber * 0x9e3779b97f4a7c15L + 0xdeadbeefcafeL);
     }
@@ -120,9 +129,27 @@ public final class DungeonRoomPlanner {
     // ─── Main entry point ────────────────────────────────────────────────────
 
     /**
-     * Carves all uncarved chunk columns within CARVE_RADIUS of the given
-     * XZ frontier. Safe to call repeatedly — already-carved chunks are
-     * skipped instantly via the carved-chunk set.
+     * Queues carving for all uncarved/unqueued chunk columns within
+     * CARVE_RADIUS of the given XZ frontier. Safe to call repeatedly —
+     * already-carved-or-queued chunks are skipped instantly via the
+     * carved-chunk set.
+     *
+     * IMPORTANT: this used to carve every chunk in the radius
+     * synchronously, right here, on whatever thread called it (always
+     * the main thread in practice - PlayerMoveEvent or an entity death
+     * event). A 9x9 chunk radius is 81 chunk columns of noise sampling
+     * and setType() calls done in one go; multiplied by the 3-8
+     * staircases DungeonStaircaseOrchestrator places per floor clear
+     * (each one calling this again for its own buffer room), that was
+     * routinely hundreds of chunk-carves inside a single tick, long
+     * enough to trip Paper's watchdog and crash the server. Now this
+     * method only enqueues chunk jobs; DungeonCarveScheduler drains a
+     * small fixed number of them per tick so no single tick ever does
+     * more than a few chunks' worth of work. The player's own standing
+     * chunk (dcx == dcz == 0) is enqueued urgent so it's essentially
+     * still carved by the next tick; everything else is normal
+     * priority and fills in over the following ticks as the player
+     * approaches.
      */
     public void planAndCarveNear(World world, int frontierX, int frontierZ) {
         if (!floorBounds.isWithinGenerationRadius(originX, originZ, frontierX, frontierZ)) {
@@ -147,13 +174,69 @@ public final class DungeonRoomPlanner {
 
                 long key = ((long) cx << 32) | (cz & 0xFFFFFFFFL);
                 if (carvedChunks.add(key)) {
-                    carveChunkColumn(world, cx, cz);
+                    boolean urgent = dcx == 0 && dcz == 0;
+                    if (carveScheduler != null) {
+                        if (urgent) {
+                            carveScheduler.enqueueUrgent(this, world, cx, cz);
+                        } else {
+                            carveScheduler.enqueueNormal(this, world, cx, cz);
+                        }
+                    } else {
+                        // No scheduler wired (e.g. a unit test constructing
+                        // this directly) - fall back to the old synchronous
+                        // behaviour rather than silently doing nothing.
+                        carveChunkColumn(world, cx, cz);
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Immediately queues (urgent lane) every chunk column that a
+     * registered boss room's footprint overlaps, regardless of player
+     * position. Called once, right after registerBossRoom, so a boss
+     * room is guaranteed to be fully carved well before any player
+     * could possibly reach it on foot - previously a boss room only
+     * ever got carved incidentally, whenever some player's frontier
+     * radius happened to sweep over it, which meant a player who
+     * walked straight to a boss room the moment it came into range
+     * could arrive before it had been carved: DungeonBossRoomTrigger
+     * would find no open column to spawn into and silently skip the
+     * boss entirely, which is the "boss isn't spawning" symptom.
+     */
+    public void enqueueBossRoomAreaUrgent(World world, DungeonRoom bossRoom) {
+        int radius = DungeonBossRoomGeometry.RADIUS + 16;
+        int minChunkX = (bossRoom.centerX() - radius) >> 4;
+        int maxChunkX = (bossRoom.centerX() + radius) >> 4;
+        int minChunkZ = (bossRoom.centerZ() - radius) >> 4;
+        int maxChunkZ = (bossRoom.centerZ() + radius) >> 4;
+
+        for (int cx = minChunkX; cx <= maxChunkX; cx++) {
+            for (int cz = minChunkZ; cz <= maxChunkZ; cz++) {
+                double chunkCentreX = (cx << 4) + 8.0;
+                double chunkCentreZ = (cz << 4) + 8.0;
+                if (!floorBounds.isWithinGenerationRadius(originX, originZ, chunkCentreX, chunkCentreZ)) {
+                    continue;
+                }
+                long key = ((long) cx << 32) | (cz & 0xFFFFFFFFL);
+                if (carvedChunks.add(key)) {
+                    if (carveScheduler != null) {
+                        carveScheduler.enqueueUrgent(this, world, cx, cz);
+                    } else {
+                        carveChunkColumn(world, cx, cz);
+                    }
                 }
             }
         }
     }
 
     // ─── Cave carving ────────────────────────────────────────────────────────
+
+    /** Entry point used by DungeonCarveScheduler to actually perform a queued carve. Package-visible on purpose. */
+    void carveChunkColumnFromScheduler(World world, int chunkX, int chunkZ) {
+        carveChunkColumn(world, chunkX, chunkZ);
+    }
 
     private void carveChunkColumn(World world, int chunkX, int chunkZ) {
         int floorY = floorBounds.floorBottomY(floorNumber);
