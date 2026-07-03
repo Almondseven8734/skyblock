@@ -214,7 +214,9 @@ public class SkyblockPlugin extends JavaPlugin {
         if (dungeonWorld == null) {
             getLogger().severe("[Dungeon] Failed to create/load the dungeon world - dungeon system disabled.");
         } else {
-            DungeonHubBuilder.buildHub(dungeonWorld, dungeonFloorBounds, (int) floor1OriginX, (int) floor1OriginZ);
+            FloorThemeRegistry dungeonThemeRegistry = new FloorThemeRegistry();
+            DungeonHubBuilder.buildHub(dungeonWorld, dungeonFloorBounds, (int) floor1OriginX, (int) floor1OriginZ,
+                    dungeonThemeRegistry.getTheme(1));
             Location floor0Location = DungeonHubBuilder.entranceLocation(dungeonWorld, dungeonFloorBounds, (int) floor1OriginX, (int) floor1OriginZ);
             Location spawnLocation = getServer().getWorlds().get(0).getSpawnLocation();
             Location portalCorner1 = DungeonHubBuilder.portalCorner1(dungeonWorld, dungeonFloorBounds, (int) floor1OriginX, (int) floor1OriginZ);
@@ -225,7 +227,6 @@ public class SkyblockPlugin extends JavaPlugin {
                 var st = dungeonStateStorage.get(p.getUniqueId());
                 return st != null && st.isInsideDungeon();
             });
-            FloorThemeRegistry dungeonThemeRegistry = new FloorThemeRegistry();
             java.util.Random dungeonRandom = new java.util.Random();
 
             // Ticks a bounded number of chunk carves per server tick instead
@@ -298,7 +299,7 @@ public class SkyblockPlugin extends JavaPlugin {
             DungeonDropItemFactory dungeonDropItemFactory = new DungeonDropItemFactory(this, dungeonDropRegistry);
             DungeonMobDropListener dungeonMobDropListener = new DungeonMobDropListener(
                 dungeonMobLevelApplicator, dungeonDropRegistry, dungeonDropItemFactory,
-                new DungeonRarityRoller(dungeonRandom), dungeonFloorBounds, dungeonRandom
+                new DungeonRarityRoller(dungeonRandom), dungeonItemGenerator, dungeonFloorBounds, dungeonRandom
             );
 
             // Stops dungeon mobs from dying to suffocation-in-terrain while
@@ -404,7 +405,8 @@ public class SkyblockPlugin extends JavaPlugin {
             // inside the scheduler before this fires, so generation is safe
             // to trigger by the time buildHub runs.
             dungeonResetSchedulerLocal.setOnWorldRecreated(newWorld -> {
-                DungeonHubBuilder.buildHub(newWorld, dungeonFloorBounds, (int) floor1OriginX, (int) floor1OriginZ);
+                DungeonHubBuilder.buildHub(newWorld, dungeonFloorBounds, (int) floor1OriginX, (int) floor1OriginZ,
+                        dungeonThemeRegistry.getTheme(1));
                 Location newFloor0Location = DungeonHubBuilder.entranceLocation(
                         newWorld, dungeonFloorBounds, (int) floor1OriginX, (int) floor1OriginZ);
                 Location newPortalCorner1 = DungeonHubBuilder.portalCorner1(

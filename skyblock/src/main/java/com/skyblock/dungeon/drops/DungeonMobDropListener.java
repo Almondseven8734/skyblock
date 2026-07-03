@@ -1,6 +1,7 @@
 package com.skyblock.dungeon.drops;
 
 import com.skyblock.dungeon.combat.MobLevelApplicator;
+import com.skyblock.dungeon.items.DungeonItemGenerator;
 import com.skyblock.dungeon.loot.DungeonRarity;
 import com.skyblock.dungeon.loot.DungeonRarityRoller;
 import com.skyblock.dungeon.util.FloorBounds;
@@ -15,30 +16,48 @@ import java.util.List;
 import java.util.Random;
 
 /**
- * Rolls a custom sellable drop (see DungeonDropRegistry) on dungeon
- * mob kills, dropped at the corpse's feet same as any vanilla drop.
+ * Rolls a custom sellable drop (see DungeonDropRegistry) AND a chance
+ * at real equippable gear (via DungeonItemGenerator, the same
+ * generator DungeonChestRoomPlacer uses for chest loot) on dungeon mob
+ * kills, dropped at the corpse's feet same as any vanilla drop.
  * Ambient mobs have a flat chance to drop nothing at all; bosses
- * always drop a small handful.
+ * always drop a small handful of sellables plus a guaranteed piece of
+ * gear.
+ *
+ * Previously this class only ever rolled DungeonDropRegistry entries -
+ * flavor/currency items with no attribute modifiers, explicitly "not
+ * equippable gear" per that class's own doc comment. There was no code
+ * path anywhere that gave a dungeon mob kill a chance at a real
+ * weapon/armor drop - chests were the only source of gear. That's the
+ * root cause of "no observed playtest of mobs dropping gear": there
+ * was nothing to observe, the feature didn't exist yet.
  */
 public final class DungeonMobDropListener implements Listener {
 
     private static final double AMBIENT_DROP_CHANCE = 0.35;
     private static final int BOSS_DROP_COUNT = 3;
 
+    /** Chance an ambient mob kill additionally rolls a gear drop, independent of the sellable-drop roll. */
+    private static final double AMBIENT_GEAR_DROP_CHANCE = 0.12;
+    /** How many guaranteed gear pieces a boss kill drops. */
+    private static final int BOSS_GEAR_DROP_COUNT = 1;
+
     private final MobLevelApplicator levelApplicator;
     private final DungeonDropRegistry dropRegistry;
     private final DungeonDropItemFactory dropItemFactory;
     private final DungeonRarityRoller rarityRoller;
+    private final DungeonItemGenerator itemGenerator;
     private final FloorBounds floorBounds;
     private final Random random;
 
     public DungeonMobDropListener(MobLevelApplicator levelApplicator, DungeonDropRegistry dropRegistry,
                                    DungeonDropItemFactory dropItemFactory, DungeonRarityRoller rarityRoller,
-                                   FloorBounds floorBounds, Random random) {
+                                   DungeonItemGenerator itemGenerator, FloorBounds floorBounds, Random random) {
         this.levelApplicator = levelApplicator;
         this.dropRegistry = dropRegistry;
         this.dropItemFactory = dropItemFactory;
         this.rarityRoller = rarityRoller;
+        this.itemGenerator = itemGenerator;
         this.floorBounds = floorBounds;
         this.random = random;
     }
@@ -63,7 +82,9 @@ public final class DungeonMobDropListener implements Listener {
 
         boolean boss = levelApplicator.isBoss(victim);
         int dropCount = boss ? BOSS_DROP_COUNT : (random.nextDouble() < AMBIENT_DROP_CHANCE ? 1 : 0);
-        if (dropCount <= 0) {
+        int gearDropCount = boss ? BOSS_GEAR_DROP_COUNT
+                : (random.nextDouble() < AMBIENT_GEAR_DROP_CHANCE ? 1 : 0);
+        if (dropCount <= 0 && gearDropCount <= 0) {
             return;
         }
 
@@ -77,6 +98,23 @@ public final class DungeonMobDropListener implements Listener {
             DungeonDropDefinition definition = pool.get(random.nextInt(pool.size()));
             ItemStack drop = dropItemFactory.build(definition);
             victim.getWorld().dropItemNaturally(victim.getLocation(), drop);
+        }
+
+        // Gear drops (real equippable weapons/armor via the same
+        // DungeonItemGenerator DungeonChestRoomPlacer uses for chest
+        // loot) - rolled independently of the sellable drops above.
+        // Bosses always drop BOSS_GEAR_DROP_COUNT pieces; ambient mobs
+        // have a flat independent chance per kill. gearDropCount was
+        // already rolled above (before the early-return) specifically
+        // so a miss on the sellable-drop roll can never suppress an
+        // otherwise-successful gear roll or vice versa - the two are
+        // fully independent chances, not one gating the other.
+        for (int i = 0; i < gearDropCount; i++) {
+            DungeonRarity gearRarity = rarityRoller.roll(floorNumber);
+            ItemStack gear = (random.nextDouble() < 0.5)
+                    ? itemGenerator.generateRandomWeapon(gearRarity)
+                    : itemGenerator.generateRandomArmor(gearRarity);
+            victim.getWorld().dropItemNaturally(victim.getLocation(), gear);
         }
     }
 }

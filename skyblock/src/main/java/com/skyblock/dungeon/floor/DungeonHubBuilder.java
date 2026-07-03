@@ -1,9 +1,13 @@
 package com.skyblock.dungeon.floor;
 
+import com.skyblock.dungeon.config.FloorTheme;
 import com.skyblock.dungeon.util.FloorBounds;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
+
+import java.util.List;
+import java.util.Random;
 
 /**
  * Builds the physical Floor 0 structure: a small fixed, non-generating
@@ -53,6 +57,25 @@ public final class DungeonHubBuilder {
 
     /** Builds the Floor 0 room: floor, walls, ceiling, and a portal block volume on the far wall. */
     public static void buildHub(World world, FloorBounds floorBounds, int floor1OriginX, int floor1OriginZ) {
+        buildHub(world, floorBounds, floor1OriginX, floor1OriginZ, null);
+    }
+
+    /**
+     * Builds the Floor 0 room: floor, walls, ceiling, a portal block
+     * volume on the far wall, and a themed gateway breach on the west
+     * wall connecting into the dungeon caves.
+     *
+     * @param floor1Theme Floor 1's theme, used to carve the gateway out
+     *                     of the same block palette as the caves it
+     *                     opens into (rather than a plain stone-brick
+     *                     doorway) so it visually reads as a hole
+     *                     breaking through into the dungeon, not just
+     *                     an interior door. Null falls back to plain
+     *                     stone bricks/cobblestone for the gateway if a
+     *                     theme genuinely isn't available yet.
+     */
+    public static void buildHub(World world, FloorBounds floorBounds, int floor1OriginX, int floor1OriginZ,
+                                 FloorTheme floor1Theme) {
         int hubFloorY = hubFloorY(floorBounds);
         int hubCenterX = hubCenterX(floor1OriginX);
         int hubCenterZ = hubCenterZ(floor1OriginZ);
@@ -87,14 +110,81 @@ public final class DungeonHubBuilder {
             }
         }
 
-        // Exit into Floor 1, on the west wall (-X side), since the hub sits
-        // east of Floor 1's origin - walking out this exit heads straight
-        // toward Floor 1. The hub's floor is already at Floor 1's own
-        // walkable Y-band, so this is a flat doorway (no ladder/descent
-        // needed) opening directly onto Floor 1's generated terrain.
-        for (int y = 1; y <= 2; y++) {
-            world.getBlockAt(hubCenterX - HUB_RADIUS_X, hubFloorY + y, hubCenterZ).setType(Material.AIR);
+        buildGateway(world, floorBounds, hubFloorY, hubCenterX, hubCenterZ, floor1Theme);
+    }
+
+    /**
+     * Carves the west-wall gateway connecting Floor 0's hub to the
+     * dungeon caves. Previously this was a plain 1-wide, 2-tall doorway
+     * cut cleanly into the stone-brick wall - functional, but it read
+     * as an interior door rather than a breach into a cave system, and
+     * its flat rectangular cut didn't match the organic cave shapes on
+     * the other side at all.
+     *
+     * This now carves a much larger (5-wide, 4-tall) ragged opening -
+     * jittered per-column height/width via a fixed-seed Random so it's
+     * deterministic and idempotent across repeated buildHub() calls,
+     * not full rectangular - and re-themes the blocks immediately
+     * around the opening (jambs, lintel, floor lip) using Floor 1's own
+     * primary/accent palette instead of the hub's plain stone bricks,
+     * so the transition from "built room" to "natural cave" is visually
+     * continuous rather than an abrupt material swap right at the
+     * doorway.
+     */
+    private static void buildGateway(World world, FloorBounds floorBounds, int hubFloorY,
+                                      int hubCenterX, int hubCenterZ, FloorTheme floor1Theme) {
+        List<Material> primary = (floor1Theme != null) ? floor1Theme.getPrimaryBlocks()
+                : List.of(Material.STONE, Material.COBBLESTONE);
+        List<Material> accent = (floor1Theme != null) ? floor1Theme.getAccentBlocks()
+                : List.of(Material.MOSSY_COBBLESTONE);
+
+        // Deterministic per-column jitter - same seed every call so
+        // repeated buildHub() invocations (idempotent by design, see
+        // class docs) always carve an identical gateway shape rather
+        // than a different random one each time.
+        Random jitter = new Random(0xCAFED00Dl ^ ((long) hubCenterX << 32 | (hubCenterZ & 0xFFFFFFFFL)));
+
+        int gatewayX = hubCenterX - HUB_RADIUS_X;
+        int halfWidth = 2; // 5 blocks wide (centerZ-2..centerZ+2)
+        int baseHeight = 4;
+
+        for (int dz = -halfWidth - 1; dz <= halfWidth + 1; dz++) {
+            int z = hubCenterZ + dz;
+            boolean insideCore = Math.abs(dz) <= halfWidth;
+
+            // Ragged edge columns (one block wider than the core opening
+            // on each side) only carve partway up, giving the opening an
+            // uneven, broken-through silhouette instead of a clean
+            // rectangle.
+            int columnHeight = insideCore
+                    ? baseHeight + jitter.nextInt(2)               // 4-5 tall through the core
+                    : 1 + jitter.nextInt(2);                       // 1-2 tall on the ragged fringe
+
+            for (int y = 1; y <= columnHeight; y++) {
+                world.getBlockAt(gatewayX, hubFloorY + y, z).setType(Material.AIR, false);
+            }
+
+            // Re-theme the jamb blocks directly bordering the opening
+            // (immediately above the carved column, and the floor lip)
+            // with Floor 1's own palette so the hub-to-cave transition
+            // reads as one continuous material instead of a hard seam
+            // between stone bricks and cave stone.
+            if (insideCore) {
+                Material jambMaterial = (jitter.nextDouble() < 0.3) ? pick(accent, jitter) : pick(primary, jitter);
+                world.getBlockAt(gatewayX, hubFloorY + columnHeight + 1, z).setType(jambMaterial, false);
+                world.getBlockAt(gatewayX, hubFloorY, z).setType(pick(primary, jitter), false);
+                // One block further out (already outside the hub's own
+                // wall ring) also gets re-themed so the floor material
+                // itself transitions before the cave's own generation
+                // pass ever reaches this column.
+                world.getBlockAt(gatewayX - 1, hubFloorY, z).setType(pick(primary, jitter), false);
+            }
         }
+    }
+
+    private static Material pick(List<Material> list, Random random) {
+        if (list.isEmpty()) return Material.STONE;
+        return list.get(random.nextInt(list.size()));
     }
 
     /** The location players should be teleported to on /dungeon - just inside the hub room. */

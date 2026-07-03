@@ -105,6 +105,33 @@ public final class DungeonFrontierListener implements Listener {
             floorNumber = 1;
         }
 
+        // Reconcile against the player's REAL vertical position rather
+        // than blindly trusting the persisted currentFloor flag.
+        //
+        // currentFloor used to only ever get written in two places:
+        // DungeonCommand (entering via the hub, always floor 1) and the
+        // Floor-0-crossing promotion right above. Nothing ever updated
+        // it when a player descended a staircase to floor 2+ - so a
+        // player physically standing on floor 2 still had currentFloor
+        // == 1 forever, and onPlayerFrontier(1, ...) kept firing every
+        // move, carving floor 1's cave band - which sits directly above
+        // floor 2 - instead of floor 2's. That's the exact "floor 1
+        // still generates above me while I'm on floor 2" symptom.
+        //
+        // FloorBounds.floorForY is the single source of truth for which
+        // floor's walkable band a Y coordinate falls in, so resolve the
+        // player's actual floor from their Y every move and correct the
+        // stored flag whenever it disagrees. A resolved value of -1
+        // (mid-shaft in a border, or standing on a ladder between
+        // floors) is intentionally ignored - we keep going with the
+        // last known-good floor rather than stopping generation while
+        // the player is transiently between bands.
+        int resolvedFloor = floorManager.floorBounds().floorForY((int) Math.floor(to.getY()));
+        if (resolvedFloor >= 1 && resolvedFloor != floorNumber) {
+            state.setCurrentFloor(resolvedFloor);
+            floorNumber = resolvedFloor;
+        }
+
         // 1. Generate at player's current position.
         floorManager.onPlayerFrontier(floorNumber, to.getX(), to.getZ());
 

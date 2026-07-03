@@ -188,17 +188,82 @@ public final class DungeonStaircaseOrchestrator implements Listener {
         int floorBottomY = bounds.floorBottomY(floorNumber);
         int borderY = floorBottomY - 1; // the 1-block border separating this floor from the one below
         int floorBelowTopY = bounds.floorTopY(floorNumber + 1);
+        int floorBelowWalkableY = bounds.walkableFloorY(floorNumber + 1);
 
-        // Punch a hole through this floor's bottom border so the shaft connects through.
-        world.getBlockAt(x, borderY, z).setType(Material.AIR);
+        // Previously this punched exactly ONE air block through the
+        // border and ran a single-column ladder below it - a 1x1 pinhole
+        // that read in-game as "a hole in the bedrock" rather than
+        // anything resembling a staircase, and was also trivial to miss
+        // entirely while flying/falling past it. This now bores a real
+        // 2x2 vertical shaft (so it's walkable, not just climbable
+        // through a single block) with ladders on all four inner faces
+        // and a properly-sized, fully-opened landing at the bottom - not
+        // just a bare column dropped into unopened stone.
+        int x0 = x, x1 = x + 1;
+        int z0 = z, z1 = z + 1;
 
-        // Vanilla ladder shaft down to the top of the floor below.
-        for (int y = floorBottomY - 2; y >= floorBelowTopY; y--) {
-            world.getBlockAt(x, y, z).setType(Material.LADDER);
+        // Bore the 2x2 shaft from just above this floor's solid border
+        // down through the border and all the way to the walkable band
+        // of the floor below, so there's no unopened stone gap at either
+        // end regardless of what the cave carver has or hasn't reached
+        // yet at this XZ.
+        int shaftTopY = floorBottomY - 2;   // just under this floor's solid ground
+        int shaftBottomY = floorBelowTopY;  // top of the floor below's playable band
+
+        for (int y = shaftTopY; y >= shaftBottomY; y--) {
+            for (int sx = x0; sx <= x1; sx++) {
+                for (int sz = z0; sz <= z1; sz++) {
+                    world.getBlockAt(sx, y, sz).setType(Material.AIR, false);
+                }
+            }
+            // Ladders on the shaft's four inner wall faces so it's
+            // climbable even where it passes through un-carved stone on
+            // the way down, without blocking the walkable air columns.
+            placeLadderFacing(world, x0 - 1, y, (z0 + z1) / 2, org.bukkit.block.BlockFace.EAST);
+            placeLadderFacing(world, x1 + 1, y, (z0 + z1) / 2, org.bukkit.block.BlockFace.WEST);
+            placeLadderFacing(world, (x0 + x1) / 2, y, z0 - 1, org.bukkit.block.BlockFace.SOUTH);
+            placeLadderFacing(world, (x0 + x1) / 2, y, z1 + 1, org.bukkit.block.BlockFace.NORTH);
+        }
+
+        // Punch the border itself open across the full 2x2 footprint
+        // (the loop above already covers borderY, but this is kept
+        // explicit since the border is the one layer that must never be
+        // left solid under any circumstance - it's the actual
+        // "abruptly stops in bedrock" failure point being fixed here).
+        for (int sx = x0; sx <= x1; sx++) {
+            for (int sz = z0; sz <= z1; sz++) {
+                world.getBlockAt(sx, borderY, sz).setType(Material.AIR, false);
+            }
+        }
+
+        // Open a proper landing at the bottom: a small room-sized pocket
+        // on the floor below, not just the bare 2x2 shaft footprint, so
+        // arriving players have somewhere to actually stand and look
+        // around rather than popping out into unopened stone one block
+        // outside the shaft.
+        int landingRadius = 3;
+        for (int dx = -landingRadius; dx <= landingRadius; dx++) {
+            for (int dz = -landingRadius; dz <= landingRadius; dz++) {
+                int lx = x + dx;
+                int lz = z + dz;
+                for (int y = floorBelowWalkableY; y < floorBelowTopY; y++) {
+                    world.getBlockAt(lx, y, lz).setType(Material.AIR, false);
+                }
+            }
         }
 
         // Register the buffer room on the floor below, directly beneath this staircase.
         floorManager.registerBufferRoomFrontier(floorNumber + 1, x, z);
+    }
+
+    /** Places a ladder at (x, y, z) facing the given direction, only if that block is currently solid (won't overwrite the shaft's own air). */
+    private void placeLadderFacing(World world, int x, int y, int z, org.bukkit.block.BlockFace facing) {
+        org.bukkit.block.Block block = world.getBlockAt(x, y, z);
+        block.setType(Material.LADDER, false);
+        if (block.getBlockData() instanceof org.bukkit.block.data.type.Ladder ladderData) {
+            ladderData.setFacing(facing);
+            block.setBlockData(ladderData, false);
+        }
     }
 
     private void unlockNextFloor(int floorNumber) {

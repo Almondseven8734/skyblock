@@ -329,16 +329,46 @@ public final class DungeonRoomPlanner {
                 for (int y = caveMinY; y <= caveMaxY; y++) {
                     if (withinSafeCarveRadius) {
                         double n = noise.sample(wx * FREQ_XZ, y * FREQ_Y, wz * FREQ_XZ);
-                        if (n < CAVE_THRESHOLD) {
+                        // Smooth the cave threshold against the solid floor
+                        // and ceiling bands instead of applying a flat cutoff
+                        // across the whole caveMinY..caveMaxY range. A flat
+                        // cutoff let noise open air flush against the solid
+                        // floor/ceiling slabs, producing a hard, unnaturally
+                        // flat plane exactly where the cave met the floor or
+                        // ceiling - "abruptly stopping" rather than tapering
+                        // like a real cave narrowing into rock. Raising the
+                        // effective threshold (making it progressively
+                        // HARDER to carve air, i.e. more likely to stay
+                        // solid) as a column approaches either edge of the
+                        // cave band creates a gradual taper: open caverns in
+                        // the middle of the vertical band, narrowing into
+                        // solid rock as they approach the floor/ceiling,
+                        // instead of a sharp cliff.
+                        double effectiveThreshold = CAVE_THRESHOLD * floorCeilingTaper(y, caveMinY, caveMaxY);
+                        if (n < effectiveThreshold) {
                             world.getBlockAt(wx, y, wz).setType(Material.AIR, false);
                             anyOpen = true;
+                        } else {
+                            // Re-theme the solid block here too (rather than
+                            // leaving whatever StoneBufferGenerator placed,
+                            // typically plain STONE) so the tapered
+                            // transition zone right at the floor/ceiling
+                            // reads as the same themed rock as the walls
+                            // elsewhere, not a visible seam of plain stone.
+                            Material m = (random.nextDouble() < 0.07) ? pick(accent) : pick(primary);
+                            world.getBlockAt(wx, y, wz).setType(m, false);
                         }
-                        // else: leave as stone (already placed by StoneBufferGenerator)
                     }
                     // else: inside the wall band - always leave solid, regardless of noise.
                 }
 
-                // Ceiling layer — always solid (stone, unchanged from buffer).
+                // Ceiling layer — always solid, themed (matches the floor
+                // treatment above so walls/floor/ceiling share one palette
+                // instead of the ceiling staying plain unthemed stone).
+                for (int y = topY - SOLID_CEIL_LAYERS; y < topY; y++) {
+                    Material m = (random.nextDouble() < 0.07) ? pick(accent) : pick(primary);
+                    world.getBlockAt(wx, y, wz).setType(m, false);
+                }
             }
         }
 
@@ -370,6 +400,34 @@ public final class DungeonRoomPlanner {
         if (carveListener != null) {
             carveListener.onRoomCarved(world, floorNumber, room);
         }
+    }
+
+    /**
+     * Multiplier applied to CAVE_THRESHOLD based on how close a Y layer
+     * is to the edges of the carvable cave band (caveMinY/caveMaxY,
+     * i.e. right above the solid floor / right below the solid
+     * ceiling). Returns 1.0 in the middle of the band (full normal cave
+     * threshold) and smoothly falls to TAPER_MIN_MULTIPLIER at the very
+     * edge, over TAPER_LAYERS worth of Y layers - making it
+     * progressively harder for noise to open air the closer a column
+     * gets to the floor/ceiling, so caves narrow into solid rock
+     * instead of stopping on a flat plane.
+     */
+    private static final int TAPER_LAYERS = 3;
+    private static final double TAPER_MIN_MULTIPLIER = 0.15;
+
+    private double floorCeilingTaper(int y, int caveMinY, int caveMaxY) {
+        int distFromFloor = y - caveMinY;
+        int distFromCeil = caveMaxY - y;
+        int distFromNearestEdge = Math.min(distFromFloor, distFromCeil);
+        if (distFromNearestEdge >= TAPER_LAYERS) {
+            return 1.0;
+        }
+        double t = distFromNearestEdge / (double) TAPER_LAYERS; // 0 at edge, 1 at taper boundary
+        // Smoothstep-style ease so the transition itself feels organic
+        // rather than a linear ramp.
+        double eased = t * t * (3 - 2 * t);
+        return TAPER_MIN_MULTIPLIER + eased * (1.0 - TAPER_MIN_MULTIPLIER);
     }
 
     // ─── Boss room cylinder carving ──────────────────────────────────────────
