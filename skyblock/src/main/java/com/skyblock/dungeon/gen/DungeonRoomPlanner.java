@@ -168,6 +168,15 @@ public final class DungeonRoomPlanner {
         List<Material> primary = theme.getPrimaryBlocks();
         List<Material> accent  = theme.getAccentBlocks();
 
+        // Does a registered boss room's circular footprint reach into this
+        // chunk at all? Checked once per chunk (cheap) rather than once per
+        // column - a boss room's 30-block radius can only ever touch a
+        // handful of chunks, so most calls here return null instantly.
+        double chunkCenterX = (chunkX << 4) + 8.0;
+        double chunkCenterZ = (chunkZ << 4) + 8.0;
+        DungeonRoom bossRoom = graph.nearestBossRoomWithin(
+                chunkCenterX, chunkCenterZ, DungeonBossRoomGeometry.RADIUS + 16);
+
         // Track whether anything was actually opened up so we only fire the
         // listener (and add a graph node) when there's real walkable space.
         boolean anyOpen = false;
@@ -177,7 +186,9 @@ public final class DungeonRoomPlanner {
                 int wx = (chunkX << 4) + lx;
                 int wz = (chunkZ << 4) + lz;
 
-                // Floor layers — always solid, themed.
+                // Floor layers — always solid, themed. Shared by both boss
+                // rooms and ordinary cave columns; only the cave band above
+                // it differs.
                 for (int y = floorY; y < floorY + SOLID_FLOOR_LAYERS; y++) {
                     Material m = (random.nextDouble() < 0.07) ? pick(accent) : pick(primary);
                     // applyPhysics=false: bulk carving must never trigger
@@ -187,6 +198,21 @@ public final class DungeonRoomPlanner {
                     // synchronous chunk load on the main thread - exactly
                     // the mechanism behind the "chunk wait" watchdog hangs.
                     world.getBlockAt(wx, y, wz).setType(m, false);
+                }
+
+                boolean inBossFootprint = bossRoom != null && DungeonBossRoomGeometry.isInsideFootprint(
+                        wx - bossRoom.centerX(), wz - bossRoom.centerZ());
+
+                if (inBossFootprint) {
+                    // Explicit cylinder shape (drum wall + 4 open doorways)
+                    // instead of noise - this is what makes a boss room
+                    // read as a deliberately built arena rather than just
+                    // another noise cave pocket. Gate doorways are carved
+                    // open here; DungeonBossGateController seals them at
+                    // runtime once the fight starts.
+                    carveBossRoomColumn(world, bossRoom, wx, wz, floorY, primary, accent);
+                    anyOpen = true;
+                    continue;
                 }
 
                 // Cave band — noise-driven, but never carved outside the
@@ -237,6 +263,38 @@ public final class DungeonRoomPlanner {
         room.markCarved();
         if (carveListener != null) {
             carveListener.onRoomCarved(world, floorNumber, room);
+        }
+    }
+
+    // ─── Boss room cylinder carving ──────────────────────────────────────────
+
+    /**
+     * Carves a single XZ column of the boss room drum: solid wall ring
+     * (except where a gate doorway cuts through it) or open interior,
+     * for the full vertical span between the solid floor cap and solid
+     * ceiling cap. Gates are carved open here by design - sealing them
+     * is a runtime action owned by DungeonBossGateController, not a
+     * generation-time one, since whether they're open depends on
+     * combat state that doesn't exist yet at carve time.
+     */
+    private void carveBossRoomColumn(World world, DungeonRoom bossRoom, int wx, int wz, int floorY,
+                                      List<Material> primary, List<Material> accent) {
+        int dx = wx - bossRoom.centerX();
+        int dz = wz - bossRoom.centerZ();
+
+        int minY = floorY + SOLID_FLOOR_LAYERS;
+        int maxY = floorY + DungeonBossRoomGeometry.HEIGHT - SOLID_CEIL_LAYERS - 1;
+
+        boolean wallRing = DungeonBossRoomGeometry.isInsideWallRing(dx, dz);
+        boolean isGate = wallRing && DungeonBossRoomGeometry.gateAt(dx, dz) != null;
+
+        for (int y = minY; y <= maxY; y++) {
+            if (wallRing && !isGate) {
+                Material m = (random.nextDouble() < 0.1) ? pick(accent) : pick(primary);
+                world.getBlockAt(wx, y, wz).setType(m, false);
+            } else {
+                world.getBlockAt(wx, y, wz).setType(Material.AIR, false);
+            }
         }
     }
 

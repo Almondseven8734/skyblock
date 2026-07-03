@@ -42,7 +42,9 @@ import com.skyblock.util.NameValidator;
 import com.skyblock.vault.VaultSystem;
 
 import com.skyblock.dungeon.combat.ExampleMilestoneBoss;
-import com.skyblock.dungeon.combat.MobBuffApplicator;
+import com.skyblock.dungeon.combat.DungeonBossGateController;
+import com.skyblock.dungeon.combat.MobLevelApplicator;
+import com.skyblock.dungeon.combat.MobLevelRoller;
 import com.skyblock.dungeon.command.DungeonCommand;
 import com.skyblock.dungeon.config.FloorThemeRegistry;
 import com.skyblock.dungeon.floor.DungeonFloorManager;
@@ -59,9 +61,24 @@ import com.skyblock.dungeon.listener.DungeonDeathHandler;
 import com.skyblock.dungeon.listener.DungeonFrontierListener;
 import com.skyblock.dungeon.listener.DungeonJoinQuitListener;
 import com.skyblock.dungeon.listener.DungeonPortalHandler;
+import com.skyblock.dungeon.classes.ClassCommand;
+import com.skyblock.dungeon.classes.ClassSkillRegistry;
+import com.skyblock.dungeon.classes.PlayerClassStorage;
+import com.skyblock.dungeon.classes.WeaponSkillListener;
+import com.skyblock.dungeon.drops.DungeonDropItemFactory;
+import com.skyblock.dungeon.drops.DungeonDropRegistry;
+import com.skyblock.dungeon.drops.DungeonMobDropListener;
+import com.skyblock.dungeon.items.DungeonItemGenerator;
+import com.skyblock.dungeon.items.ItemCombatStatsListener;
+import com.skyblock.dungeon.items.ItemLevelGateListener;
 import com.skyblock.dungeon.loot.DungeonLootTable;
 import com.skyblock.dungeon.loot.DungeonRarityRoller;
+import com.skyblock.dungeon.progression.DungeonXpListener;
+import com.skyblock.dungeon.progression.PlayerProgressionStorage;
 import com.skyblock.dungeon.spawn.DungeonBossRoomTrigger;
+import com.skyblock.guild.GuildCommand;
+import com.skyblock.guild.GuildInviteManager;
+import com.skyblock.guild.GuildStorage;
 import com.skyblock.dungeon.spawn.DungeonChestRoomPlacer;
 import com.skyblock.dungeon.spawn.DungeonRoomMobSpawner;
 import com.skyblock.dungeon.util.FloorBounds;
@@ -212,13 +229,51 @@ public class SkyblockPlugin extends JavaPlugin {
             DungeonStaircaseOrchestrator dungeonStaircaseOrchestrator =
                 new DungeonStaircaseOrchestrator(dungeonFloorManager, getLogger(), dungeonRandom);
 
-            MobBuffApplicator dungeonMobBuffApplicator = new MobBuffApplicator();
-            DungeonRoomMobSpawner dungeonMobSpawner =
-                new DungeonRoomMobSpawner(dungeonThemeRegistry, dungeonMobBuffApplicator, dungeonRandom);
-            DungeonLootTable dungeonLootTable = new DungeonLootTable(new DungeonRarityRoller(), dungeonRandom);
+            MobLevelRoller dungeonMobLevelRoller =
+                new MobLevelRoller(dungeonFloorBounds.maxFloorCount(), dungeonRandom);
+            MobLevelApplicator dungeonMobLevelApplicator = new MobLevelApplicator(this);
+            DungeonRoomMobSpawner dungeonMobSpawner = new DungeonRoomMobSpawner(
+                this, dungeonThemeRegistry, dungeonMobLevelRoller, dungeonMobLevelApplicator, dungeonRandom
+            );
+            PlayerProgressionStorage dungeonProgressionStorage =
+                new PlayerProgressionStorage(getDataFolder(), getLogger());
+            DungeonXpListener dungeonXpListener =
+                new DungeonXpListener(dungeonMobLevelApplicator, dungeonProgressionStorage);
+
+            ClassSkillRegistry dungeonSkillRegistry = new ClassSkillRegistry();
+            PlayerClassStorage dungeonClassStorage = new PlayerClassStorage(getDataFolder(), getLogger());
+            WeaponSkillListener dungeonWeaponSkillListener = new WeaponSkillListener(
+                this, dungeonClassStorage, dungeonSkillRegistry, dungeonProgressionStorage
+            );
+            ClassCommand dungeonClassCommand =
+                new ClassCommand(dungeonClassStorage, dungeonSkillRegistry, dungeonProgressionStorage);
+
+            DungeonItemGenerator dungeonItemGenerator = new DungeonItemGenerator(this, dungeonRandom);
+            ItemLevelGateListener dungeonItemLevelGateListener =
+                new ItemLevelGateListener(dungeonItemGenerator, dungeonProgressionStorage);
+            ItemCombatStatsListener dungeonItemCombatStatsListener =
+                new ItemCombatStatsListener(dungeonItemGenerator, dungeonRandom);
+
+            DungeonLootTable dungeonLootTable =
+                new DungeonLootTable(new DungeonRarityRoller(), dungeonRandom, dungeonItemGenerator);
             DungeonChestRoomPlacer dungeonChestPlacer = new DungeonChestRoomPlacer(dungeonLootTable, dungeonRandom);
+
+            DungeonDropRegistry dungeonDropRegistry = new DungeonDropRegistry();
+            DungeonDropItemFactory dungeonDropItemFactory = new DungeonDropItemFactory(this, dungeonDropRegistry);
+            DungeonMobDropListener dungeonMobDropListener = new DungeonMobDropListener(
+                dungeonMobLevelApplicator, dungeonDropRegistry, dungeonDropItemFactory,
+                new DungeonRarityRoller(dungeonRandom), dungeonFloorBounds, dungeonRandom
+            );
+
+            GuildStorage guildStorage = new GuildStorage(getDataFolder(), getLogger());
+            GuildInviteManager guildInviteManager = new GuildInviteManager();
+            GuildCommand guildCommand = new GuildCommand(guildStorage, guildInviteManager, dungeonDropItemFactory);
+
+            DungeonBossGateController dungeonBossGateController =
+                new DungeonBossGateController(this, dungeonFloorManager, dungeonThemeRegistry);
             DungeonBossRoomTrigger dungeonBossRoomTrigger = new DungeonBossRoomTrigger(
-                this, dungeonThemeRegistry, dungeonMobBuffApplicator, dungeonStaircaseOrchestrator, dungeonRandom
+                this, dungeonThemeRegistry, dungeonMobLevelRoller, dungeonMobLevelApplicator,
+                dungeonStaircaseOrchestrator, dungeonBossGateController, dungeonRandom
             );
 
             // Milestone floors (every 5th, per FloorThemeRegistry) get a real
@@ -305,12 +360,20 @@ public class SkyblockPlugin extends JavaPlugin {
             this.dungeonResetScheduler = dungeonResetSchedulerLocal;
 
             getCommand("dungeon").setExecutor(dungeonCommand);
+            getCommand("class").setExecutor(dungeonClassCommand);
+            getCommand("guild").setExecutor(guildCommand);
 
             pm.registerEvents(dungeonDeathHandler, this);
             pm.registerEvents(dungeonPortalHandler, this);
             pm.registerEvents(dungeonLockdownListener, this);
             pm.registerEvents(dungeonJoinQuitListener, this);
             pm.registerEvents(dungeonStaircaseOrchestrator, this);
+            pm.registerEvents(dungeonBossGateController, this);
+            pm.registerEvents(dungeonXpListener, this);
+            pm.registerEvents(dungeonWeaponSkillListener, this);
+            pm.registerEvents(dungeonItemLevelGateListener, this);
+            pm.registerEvents(dungeonItemCombatStatsListener, this);
+            pm.registerEvents(dungeonMobDropListener, this);
             pm.registerEvents(dungeonFrontierListener, this);
             pm.registerEvents(dungeonChestLootListener, this);
             pm.registerEvents(dungeonBlockProtectionListener, this);

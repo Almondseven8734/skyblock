@@ -21,6 +21,9 @@ commands:
   bal:
     description: Check your money balance
     usage: /bal
+  class:
+    description: Choose your dungeon class and manage skills
+    usage: /class [choose <swordsman|scout|bowman>|skills|learn <skillId>]
   crates:
     description: Teleport to crates
     usage: /crates
@@ -30,6 +33,9 @@ commands:
   gemshop:
     description: Open the gem shop
     usage: /gemshop
+  guild:
+    description: Manage your guild and sell mob drops to the guild merchant
+    usage: /guild [create <name>|invite <player>|accept|leave|disband|info [name]|list|sell]
   is:
     description: Skyblock island commands
     usage: /is <create|go|spawn|leave|reset|confirm|accept|deny|info|invite|remove|setrank|op|name|help>

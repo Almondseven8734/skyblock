@@ -87,6 +87,27 @@ public final class RoomGraph {
     }
 
     /**
+     * Nearest BOSS-type room within maxDist of a point, or null if none
+     * qualifies. Used by DungeonRoomPlanner to detect whether a chunk
+     * column about to be carved overlaps a registered boss room's
+     * footprint and needs the explicit cylinder shape instead of
+     * ordinary cave noise.
+     */
+    public DungeonRoom nearestBossRoomWithin(double x, double z, double maxDist) {
+        DungeonRoom best = null;
+        double bestDist = Double.MAX_VALUE;
+        for (DungeonRoom room : rooms.values()) {
+            if (room.type() != DungeonRoom.Type.BOSS) continue;
+            double d = room.distanceTo((int) Math.round(x), (int) Math.round(z));
+            if (d <= maxDist && d < bestDist) {
+                bestDist = d;
+                best = room;
+            }
+        }
+        return best;
+    }
+
+    /**
      * Registers a room (typically a buffer room or a room containing a
      * just-placed staircase) as something future generation should try
      * to route toward, per the "intentionally connect known frontiers"

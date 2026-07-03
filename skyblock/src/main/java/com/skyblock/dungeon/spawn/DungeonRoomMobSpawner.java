@@ -1,25 +1,37 @@
 package com.skyblock.dungeon.spawn;
 
-import com.skyblock.dungeon.combat.MobBuffApplicator;
+import com.skyblock.dungeon.combat.MobLevelApplicator;
+import com.skyblock.dungeon.combat.MobLevelRoller;
+import com.skyblock.dungeon.combat.ai.BatSwoopAI;
+import com.skyblock.dungeon.combat.ai.HostileGolemAI;
 import com.skyblock.dungeon.config.FloorTheme;
 import com.skyblock.dungeon.config.FloorThemeRegistry;
 import com.skyblock.dungeon.gen.DungeonRoom;
 import org.bukkit.Location;
 import org.bukkit.World;
+import org.bukkit.entity.Bat;
 import org.bukkit.entity.EntityType;
+import org.bukkit.entity.IronGolem;
 import org.bukkit.entity.LivingEntity;
+import org.bukkit.plugin.java.JavaPlugin;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 
 /**
  * Populates a newly carved room with ambient mobs drawn from that
- * floor's FloorTheme mob pool, scaled via MobBuffApplicator's
- * per-floor curve. Intended to be called from a
+ * floor's FloorTheme mob pool, leveled via MobLevelRoller/
+ * MobLevelApplicator. Intended to be called from a
  * DungeonRoomPlanner.RoomCarveListener the moment a NORMAL or CHEST
  * room finishes carving - BOSS and BUFFER rooms are skipped here,
  * since boss rooms get their own dedicated trigger and buffer rooms
  * are meant to be plain connectors per design.
+ *
+ * Per design, each room only draws from a 1-3 type subset of the
+ * floor's full mob pool (picked once per room) rather than mixing the
+ * whole roster freely - so a given room reads as "the spider room" or
+ * "the zombie/husk room" instead of a random grab-bag.
  */
 public final class DungeonRoomMobSpawner {
 
@@ -30,13 +42,22 @@ public final class DungeonRoomMobSpawner {
     /** Random tries at finding a verified-open column before falling back to a full scan. */
     private static final int MAX_LOCATE_ATTEMPTS = 12;
 
+    private static final int MIN_ROOM_MOB_TYPES = 1;
+    private static final int MAX_ROOM_MOB_TYPES = 3;
+
+    private final JavaPlugin plugin;
     private final FloorThemeRegistry themeRegistry;
-    private final MobBuffApplicator buffApplicator;
+    private final MobLevelRoller levelRoller;
+    private final MobLevelApplicator levelApplicator;
     private final Random random;
 
-    public DungeonRoomMobSpawner(FloorThemeRegistry themeRegistry, MobBuffApplicator buffApplicator, Random random) {
+    public DungeonRoomMobSpawner(JavaPlugin plugin, FloorThemeRegistry themeRegistry,
+                                  MobLevelRoller levelRoller, MobLevelApplicator levelApplicator,
+                                  Random random) {
+        this.plugin = plugin;
         this.themeRegistry = themeRegistry;
-        this.buffApplicator = buffApplicator;
+        this.levelRoller = levelRoller;
+        this.levelApplicator = levelApplicator;
         this.random = random;
     }
 
@@ -46,8 +67,8 @@ public final class DungeonRoomMobSpawner {
         }
 
         FloorTheme theme = themeRegistry.getTheme(floorNumber);
-        List<EntityType> mobPool = theme.getMobPool();
-        if (mobPool.isEmpty()) {
+        List<EntityType> roomPool = pickRoomMobTypes(theme.getMobPool());
+        if (roomPool.isEmpty()) {
             return;
         }
 
@@ -71,13 +92,42 @@ public final class DungeonRoomMobSpawner {
                 continue; // this room has no verified-open column (yet) - skip this mob rather than embed it
             }
 
-            EntityType type = mobPool.get(random.nextInt(mobPool.size()));
+            EntityType type = roomPool.get(random.nextInt(roomPool.size()));
             Location spawnLoc = new Location(world, spot[0] + 0.5, groundY, spot[1] + 0.5);
 
             if (!(world.spawnEntity(spawnLoc, type) instanceof LivingEntity entity)) {
                 continue;
             }
-            buffApplicator.applyAmbientMobScaling(entity, floorNumber);
+
+            int level = levelRoller.rollAmbientLevel(floorNumber);
+            levelApplicator.applyLevel(entity, level);
+            hookCustomAi(entity);
+        }
+    }
+
+    /**
+     * Picks a stable 1-3 type subset of a floor's full mob pool for one
+     * room. Capped to the pool's own size in case a theme is configured
+     * with fewer than 3 types.
+     */
+    private List<EntityType> pickRoomMobTypes(List<EntityType> fullPool) {
+        if (fullPool.isEmpty()) {
+            return List.of();
+        }
+        int max = Math.min(MAX_ROOM_MOB_TYPES, fullPool.size());
+        int count = MIN_ROOM_MOB_TYPES + (max > MIN_ROOM_MOB_TYPES ? random.nextInt(max - MIN_ROOM_MOB_TYPES + 1) : 0);
+
+        List<EntityType> shuffled = new ArrayList<>(fullPool);
+        java.util.Collections.shuffle(shuffled, random);
+        return shuffled.subList(0, count);
+    }
+
+    /** Bats and iron golems don't naturally attack players - bolt on custom AI for them. */
+    private void hookCustomAi(LivingEntity entity) {
+        if (entity instanceof Bat bat) {
+            BatSwoopAI.start(plugin, bat);
+        } else if (entity instanceof IronGolem golem) {
+            HostileGolemAI.start(plugin, golem);
         }
     }
 }

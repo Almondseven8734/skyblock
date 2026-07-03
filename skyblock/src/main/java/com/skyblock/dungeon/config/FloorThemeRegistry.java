@@ -58,28 +58,37 @@ public final class FloorThemeRegistry {
      * explicitly listed still resolve to something reasonable.
      */
     private enum DepthBand {
+        // Per-band pool is the *eligible* roster for that depth - DungeonRoomMobSpawner
+        // draws a 1-3 type subset from this pool per room, it doesn't spawn the whole
+        // pool at once. Rosters are hand-picked per user spec (20 mob types total,
+        // spread so shallow floors skew toward weaker/simpler mobs and deep floors
+        // introduce the harder-hitting ones like blaze/wither skeleton/evoker/vex).
         STONE_CAVES(1, 4, "Stone Caverns",
             List.of(Material.STONE, Material.COBBLESTONE, Material.MOSSY_COBBLESTONE),
             List.of(Material.MOSS_BLOCK, Material.GRAVEL),
-            List.of(EntityType.ZOMBIE, EntityType.SPIDER, EntityType.CAVE_SPIDER),
+            List.of(EntityType.ZOMBIE, EntityType.SPIDER, EntityType.CAVE_SPIDER,
+                    EntityType.SILVERFISH, EntityType.BAT, EntityType.ZOMBIE_VILLAGER),
             List.of("none")),
 
         DEEPSLATE_HALLS(5, 9, "Deepslate Halls",
             List.of(Material.DEEPSLATE, Material.COBBLED_DEEPSLATE, Material.TUFF),
             List.of(Material.DEEPSLATE_BRICKS, Material.DEEPSLATE_TILES),
-            List.of(EntityType.SKELETON, EntityType.HUSK, EntityType.SILVERFISH),
+            List.of(EntityType.SKELETON, EntityType.HUSK, EntityType.SILVERFISH,
+                    EntityType.DROWNED, EntityType.ENDERMAN, EntityType.CREEPER),
             List.of("darkness")),
 
         SCORCHED_DEPTHS(10, 14, "Scorched Depths",
             List.of(Material.BLACKSTONE, Material.BASALT, Material.MAGMA_BLOCK),
             List.of(Material.NETHERRACK, Material.GILDED_BLACKSTONE),
-            List.of(EntityType.BLAZE, EntityType.WITHER_SKELETON, EntityType.MAGMA_CUBE),
+            List.of(EntityType.BLAZE, EntityType.WITHER_SKELETON, EntityType.MAGMA_CUBE,
+                    EntityType.SLIME, EntityType.HUSK, EntityType.IRON_GOLEM),
             List.of("fire", "lava_pits")),
 
         FROZEN_ABYSS(15, 18, "Frozen Abyss",
             List.of(Material.PACKED_ICE, Material.BLUE_ICE, Material.SNOW_BLOCK),
             List.of(Material.ICE, Material.POWDER_SNOW),
-            List.of(EntityType.STRAY, EntityType.POLAR_BEAR, EntityType.WARDEN),
+            List.of(EntityType.STRAY, EntityType.BOGGED, EntityType.VEX,
+                    EntityType.EVOKER, EntityType.ENDERMAN, EntityType.IRON_GOLEM),
             List.of("freezing", "low_visibility"));
 
         final int minFloor;

@@ -1,14 +1,20 @@
 package com.skyblock.dungeon.spawn;
 
+import com.skyblock.dungeon.combat.DungeonBossGateController;
 import com.skyblock.dungeon.combat.MilestoneBoss;
-import com.skyblock.dungeon.combat.MobBuffApplicator;
+import com.skyblock.dungeon.combat.MobLevelApplicator;
+import com.skyblock.dungeon.combat.MobLevelRoller;
+import com.skyblock.dungeon.combat.ai.BatSwoopAI;
+import com.skyblock.dungeon.combat.ai.HostileGolemAI;
 import com.skyblock.dungeon.config.FloorTheme;
 import com.skyblock.dungeon.config.FloorThemeRegistry;
 import com.skyblock.dungeon.floor.DungeonStaircaseOrchestrator;
 import com.skyblock.dungeon.gen.DungeonRoom;
 import org.bukkit.Location;
 import org.bukkit.World;
+import org.bukkit.entity.Bat;
 import org.bukkit.entity.EntityType;
+import org.bukkit.entity.IronGolem;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -44,10 +50,15 @@ public final class DungeonBossRoomTrigger {
     /** Random tries at finding a verified-open column before falling back to a full scan. */
     private static final int MAX_LOCATE_ATTEMPTS = 20;
 
+    /** Extra multiplier applied on top of a boss's rolled-level scaling, so a boss always hits harder than an ambient mob of the same level. */
+    private static final double BOSS_BONUS_MULTIPLIER = 2.5;
+
     private final JavaPlugin plugin;
     private final FloorThemeRegistry themeRegistry;
-    private final MobBuffApplicator buffApplicator;
+    private final MobLevelRoller levelRoller;
+    private final MobLevelApplicator levelApplicator;
     private final DungeonStaircaseOrchestrator orchestrator;
+    private final DungeonBossGateController gateController;
     private final Random random;
 
     /** Optional per-floor scripted boss factories. Floors without an entry here fall back to buffed vanilla. */
@@ -57,12 +68,15 @@ public final class DungeonBossRoomTrigger {
     private final Set<UUID> triggeredRooms = ConcurrentHashMap.newKeySet();
 
     public DungeonBossRoomTrigger(JavaPlugin plugin, FloorThemeRegistry themeRegistry,
-                                   MobBuffApplicator buffApplicator, DungeonStaircaseOrchestrator orchestrator,
-                                   Random random) {
+                                   MobLevelRoller levelRoller, MobLevelApplicator levelApplicator,
+                                   DungeonStaircaseOrchestrator orchestrator,
+                                   DungeonBossGateController gateController, Random random) {
         this.plugin = plugin;
         this.themeRegistry = themeRegistry;
-        this.buffApplicator = buffApplicator;
+        this.levelRoller = levelRoller;
+        this.levelApplicator = levelApplicator;
         this.orchestrator = orchestrator;
+        this.gateController = gateController;
         this.random = random;
     }
 
@@ -109,13 +123,31 @@ public final class DungeonBossRoomTrigger {
             }
 
             orchestrator.registerBoss(entity.getUniqueId(), floorNumber);
+            gateController.registerBoss(entity.getUniqueId(), floorNumber, bossRoom);
+
+            // Level treatment always applies first (stats, tier buffs, gear,
+            // name-tag, PDC level tag) so a milestone boss's phase-threshold
+            // math below reads its true, final max health - the scripted
+            // factory only layers ability/phase logic on top, it never
+            // re-touches the base stats.
+            int level = levelRoller.rollBossLevel(floorNumber);
+            levelApplicator.applyLevel(entity, level, BOSS_BONUS_MULTIPLIER);
+            levelApplicator.tagBoss(entity);
+            hookCustomAi(entity);
 
             if (factory != null) {
                 MilestoneBoss boss = factory.create(plugin, entity, floorNumber);
                 plugin.getServer().getScheduler().runTaskTimer(plugin, boss::update, 0L, MILESTONE_BOSS_TICK_PERIOD);
-            } else {
-                buffApplicator.applyBossScaling(entity, floorNumber);
             }
+        }
+    }
+
+    /** Bats and iron golems don't naturally attack players - bolt on custom AI for them, same as ambient spawns. */
+    private void hookCustomAi(LivingEntity entity) {
+        if (entity instanceof Bat bat) {
+            BatSwoopAI.start(plugin, bat);
+        } else if (entity instanceof IronGolem golem) {
+            HostileGolemAI.start(plugin, golem);
         }
     }
 
