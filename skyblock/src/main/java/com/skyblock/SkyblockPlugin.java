@@ -328,6 +328,7 @@ public class SkyblockPlugin extends JavaPlugin {
                 this, dungeonFloorManager, getDataFolder(),
                 () -> new DungeonWorldGenerator(dungeonFloorBounds, floor1OriginX, floor1OriginZ),
                 () -> getServer().getWorlds().get(0).getSpawnLocation(),
+                dungeonCarveSchedulerLocal,
                 getLogger()
             );
 

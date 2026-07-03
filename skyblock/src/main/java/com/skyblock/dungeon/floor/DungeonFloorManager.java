@@ -212,6 +212,24 @@ public final class DungeonFloorManager {
      */
     public void setDungeonWorld(World dungeonWorld) {
         this.dungeonWorld = dungeonWorld;
+
+        // If resetAll() ran before this (the normal reset order - see
+        // DungeonResetScheduler.performReset/finishReset), Floor 1 is
+        // unlocked but has no boss room yet: placeBossRoom() was
+        // deliberately NOT called from resetAll(), because at that
+        // point dungeonWorld was still the OLD world instance (about to
+        // be unloaded) - enqueueing the boss room's carve jobs against
+        // it meant those jobs either threw "chunk system has shut down"
+        // once the old world was unloaded, or in the best case carved
+        // the wrong World object entirely. Either way the boss room's
+        // chunk keys got marked as queued/carved and would never be
+        // retried against the real new world, so the boss room was
+        // permanently uncarvable and the boss could never spawn. Placing
+        // it here instead, now that dungeonWorld correctly points at the
+        // freshly created world, is the actual fix.
+        if (unlockedFloors.contains(1) && bossRooms.get(1) == null) {
+            placeBossRoom(1, getOrCreatePlanner(1));
+        }
     }
 
     // ─── Frontier-driven generation ─────────────────────────────────────────
@@ -247,7 +265,17 @@ public final class DungeonFloorManager {
 
     // ─── Weekly reset ───────────────────────────────────────────────────────
 
-    /** Wipes all in-memory floor state for the weekly dungeon reset. The world itself is regenerated separately. */
+    /**
+     * Wipes all in-memory floor state for the weekly dungeon reset. The
+     * world itself is regenerated separately, and critically, AFTER this
+     * method returns (see DungeonResetScheduler.performReset ->
+     * finishReset) - dungeonWorld here is still the old, soon-to-be-
+     * unloaded World instance. Floor 1's boss room is deliberately NOT
+     * re-placed here for that reason: doing so would enqueue its carve
+     * jobs against the wrong World object. It's placed instead from
+     * setDungeonWorld(), once dungeonWorld actually points at the fresh
+     * world.
+     */
     public void resetAll() {
         unlockedFloors.clear();
         unlockedFloors.add(1);
@@ -257,7 +285,7 @@ public final class DungeonFloorManager {
         staircaseValidators.clear();
         bossRooms.clear();
         bossKillTracker.resetAll();
-        placeBossRoom(1, getOrCreatePlanner(1));
-        logger.info("[Dungeon] Weekly reset complete - floor state cleared, Floor 1 unlocked.");
+        logger.info("[Dungeon] Weekly reset complete - floor state cleared, Floor 1 unlocked "
+                + "(boss room will be placed once the new world is live).");
     }
 }

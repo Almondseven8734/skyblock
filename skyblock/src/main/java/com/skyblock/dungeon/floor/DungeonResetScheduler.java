@@ -1,5 +1,6 @@
 package com.skyblock.dungeon.floor;
 
+import com.skyblock.dungeon.gen.DungeonCarveScheduler;
 import org.bukkit.Bukkit;
 import org.bukkit.World;
 import org.bukkit.WorldCreator;
@@ -50,6 +51,7 @@ public final class DungeonResetScheduler {
     private final File dataFolder;
     private final ChunkGeneratorFactory generatorFactory;
     private final java.util.function.Supplier<org.bukkit.Location> spawnLocationSupplier;
+    private final DungeonCarveScheduler carveScheduler;
     private final Logger logger;
 
     private int taskId = -1;
@@ -101,12 +103,14 @@ public final class DungeonResetScheduler {
     public DungeonResetScheduler(JavaPlugin plugin, DungeonFloorManager floorManager, File dataFolder,
                                   ChunkGeneratorFactory generatorFactory,
                                   java.util.function.Supplier<org.bukkit.Location> spawnLocationSupplier,
+                                  DungeonCarveScheduler carveScheduler,
                                   Logger logger) {
         this.plugin = plugin;
         this.floorManager = floorManager;
         this.dataFolder = dataFolder;
         this.generatorFactory = generatorFactory;
         this.spawnLocationSupplier = spawnLocationSupplier;
+        this.carveScheduler = carveScheduler;
         this.logger = logger;
     }
 
@@ -184,6 +188,16 @@ public final class DungeonResetScheduler {
 
     private void finishReset(World oldWorld) {
         String oldWorldName = oldWorld.getName();
+
+        // Drop any carve jobs still sitting in the scheduler that target
+        // this world before it goes away. Without this, a job enqueued
+        // moments earlier (e.g. from a player's frontier, or - before the
+        // DungeonFloorManager fix - from resetAll's boss room placement)
+        // would still be in the queue when unloadWorld() below runs, and
+        // draining it afterwards throws "Chunk system has shut down" -
+        // exactly the exception in the crash log.
+        carveScheduler.purgeWorld(oldWorld);
+
         boolean unloaded = Bukkit.unloadWorld(oldWorld, false);
         if (!unloaded) {
             logger.warning("[Dungeon] Failed to unload dungeon world '" + oldWorldName + "' - reset aborted, "

@@ -72,6 +72,22 @@ public final class DungeonCarveScheduler {
         normal.add(new Job(planner, world, chunkX, chunkZ));
     }
 
+    /**
+     * Drops every queued job (both lanes) that targets the given world.
+     * Call this right when a dungeon world is about to be unloaded (see
+     * DungeonResetScheduler.finishReset) so no leftover job can ever be
+     * drained against a World whose chunk system is already shut down -
+     * that was the direct cause of the
+     * "Chunk system has shut down, cannot process chunk requests"
+     * exceptions: a job enqueued moments before a reset would still be
+     * sitting in these queues when the old world was unloaded a tick
+     * later, and drain() would try to carve into it anyway.
+     */
+    public void purgeWorld(World world) {
+        urgent.removeIf(job -> job.world().equals(world));
+        normal.removeIf(job -> job.world().equals(world));
+    }
+
     /** True if this scheduler currently has no pending work for the given planner (used by tests/diagnostics). */
     public boolean isIdle() {
         return urgent.isEmpty() && normal.isEmpty();
@@ -86,7 +102,19 @@ public final class DungeonCarveScheduler {
     private int drain(Deque<Job> queue, int budget) {
         while (budget > 0 && !queue.isEmpty()) {
             Job job = queue.poll();
-            job.planner().carveChunkColumnFromScheduler(job.world(), job.chunkX(), job.chunkZ());
+            try {
+                job.planner().carveChunkColumnFromScheduler(job.world(), job.chunkX(), job.chunkZ());
+            } catch (IllegalStateException ex) {
+                // Last-resort safety net: purgeWorld() should mean this
+                // never actually happens in practice now, but if some
+                // other path ever enqueues a job against a world that
+                // gets unloaded before its turn, drop it and keep going
+                // instead of letting the exception escape and abort the
+                // rest of this tick's budget - previously that meant one
+                // stale job silently ate the ENTIRE tick's worth of carve
+                // work (not just its own slot), repeatedly, once per
+                // tick, until the queue happened to drain past it.
+            }
             budget--;
         }
         return budget;

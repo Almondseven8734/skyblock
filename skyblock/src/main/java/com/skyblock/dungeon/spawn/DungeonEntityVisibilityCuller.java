@@ -21,20 +21,36 @@ import java.util.UUID;
 /**
  * Periodically hides dungeon mobs from a player's client (rather than
  * despawning or otherwise affecting them server-side) once they're
- * either more than VISIBLE_RANGE blocks away or have solid blocks
+ * either more than RENDER_RANGE blocks away or have solid blocks
  * between them and the player - purely a render-cost reduction for
  * rooms packed with ambient mobs, since the 3x spawn-rate pass means
- * far more entities are alive per floor at once.
+ * far more entities are alive per floor at once. Independently of
+ * that, name tags are only shown once a mob is within the closer
+ * NAMETAG_RANGE - a mob can be fully rendered and walking around
+ * without its tag showing yet.
  *
- * Deliberately client-side only (Player#hideEntity/#showEntity): the
- * mob keeps ticking, pathing, and existing normally server-side the
- * whole time, so combat/AI/aggro are completely unaffected - a mob
- * that walks back into range or into the player's line of sight is
- * simply shown again next pass.
+ * Deliberately client-side only for entity visibility
+ * (Player#hideEntity/#showEntity): the mob keeps ticking, pathing, and
+ * existing normally server-side the whole time, so combat/AI/aggro are
+ * completely unaffected - a mob that walks back into range or into the
+ * player's line of sight is simply shown again next pass.
+ *
+ * Name-tag visibility is NOT per-player, though - LivingEntity#setCustomNameVisible
+ * is a single flag broadcast to every viewer, there's no vanilla API
+ * for "show this tag to player A but not player B". So it's driven off
+ * whichever player currently rendering the mob is closest to it: if
+ * anyone who can currently see the mob is within NAMETAG_RANGE, the tag
+ * shows for everyone who can see the mob. In a full dungeon party
+ * (who are usually close together anyway) this reads correctly for
+ * whoever's actually nearest; it's the one property that's genuinely
+ * shared rather than fully per-player.
  */
 public final class DungeonEntityVisibilityCuller {
 
-    private static final double VISIBLE_RANGE = 10.0;
+    /** A mob farther than this from every player is hidden entirely, regardless of line of sight. */
+    private static final double RENDER_RANGE = 20.0;
+    /** Even a rendered mob only shows its name tag once some player is this close. */
+    private static final double NAMETAG_RANGE = 10.0;
     /** How far out to even bother scanning for candidate mobs per player. */
     private static final double SCAN_RADIUS = 48.0;
     private static final long PERIOD_TICKS = 10L; // twice a second
@@ -72,9 +88,17 @@ public final class DungeonEntityVisibilityCuller {
             return;
         }
 
+        // Closest distance, across all players, at which each mob is
+        // currently being rendered to someone this tick - used below to
+        // drive the (necessarily global, see class doc) nametag flag.
+        // Only mobs some player can actually see get an entry.
+        Map<UUID, Double> nearestRenderedDistance = new HashMap<>();
+
         for (Player player : dungeonWorld.getPlayers()) {
-            updateVisibilityFor(player, dungeonWorld);
+            updateVisibilityFor(player, dungeonWorld, nearestRenderedDistance);
         }
+
+        applyNameTagVisibility(nearestRenderedDistance);
 
         // Drop bookkeeping for players who've left the dungeon world entirely,
         // so this map doesn't quietly grow across a long-running server.
@@ -84,7 +108,7 @@ public final class DungeonEntityVisibilityCuller {
         });
     }
 
-    private void updateVisibilityFor(Player player, World dungeonWorld) {
+    private void updateVisibilityFor(Player player, World dungeonWorld, Map<UUID, Double> nearestRenderedDistance) {
         Location eye = player.getEyeLocation();
         Set<UUID> currentlyHidden = hiddenByPlayer.computeIfAbsent(player.getUniqueId(), k -> new HashSet<>());
 
@@ -103,7 +127,9 @@ public final class DungeonEntityVisibilityCuller {
             }
 
             stillCandidates.add(mob.getUniqueId());
-            boolean shouldHide = shouldHide(eye, mob);
+
+            double distance = eye.distance(mob.getEyeLocation());
+            boolean shouldHide = shouldHide(eye, mob, distance);
             boolean isHidden = currentlyHidden.contains(mob.getUniqueId());
 
             if (shouldHide && !isHidden) {
@@ -112,6 +138,10 @@ public final class DungeonEntityVisibilityCuller {
             } else if (!shouldHide && isHidden) {
                 player.showEntity(plugin, mob);
                 currentlyHidden.remove(mob.getUniqueId());
+            }
+
+            if (!shouldHide) {
+                nearestRenderedDistance.merge(mob.getUniqueId(), distance, Math::min);
             }
         }
 
@@ -132,13 +162,33 @@ public final class DungeonEntityVisibilityCuller {
         });
     }
 
-    private boolean shouldHide(Location playerEye, LivingEntity mob) {
-        Location mobEye = mob.getEyeLocation();
-        double distance = playerEye.distance(mobEye);
-        if (distance > VISIBLE_RANGE) {
+    /**
+     * Sets each currently-rendered mob's nametag on or off based on the
+     * closest player who can see it this tick. Mobs nobody can currently
+     * see are left alone entirely - their tag state doesn't matter to
+     * anyone until they're rendered again, at which point this runs
+     * fresh for them anyway.
+     */
+    private void applyNameTagVisibility(Map<UUID, Double> nearestRenderedDistance) {
+        for (Map.Entry<UUID, Double> entry : nearestRenderedDistance.entrySet()) {
+            org.bukkit.entity.Entity entity = plugin.getServer().getEntity(entry.getKey());
+            if (entity instanceof LivingEntity mob) {
+                mob.setCustomNameVisible(entry.getValue() <= NAMETAG_RANGE);
+            }
+        }
+    }
+
+    /**
+     * True if this mob should be hidden from this player entirely: either
+     * it's farther than RENDER_RANGE, or - checked independently of
+     * range - a solid block sits between the two. A mob 3 blocks away
+     * through a wall is still hidden even though it's well within range.
+     */
+    private boolean shouldHide(Location playerEye, LivingEntity mob, double distance) {
+        if (distance > RENDER_RANGE) {
             return true;
         }
-        return isBlockedByTerrain(playerEye, mobEye, distance);
+        return isBlockedByTerrain(playerEye, mob.getEyeLocation(), distance);
     }
 
     private boolean isBlockedByTerrain(Location from, Location to, double distance) {
