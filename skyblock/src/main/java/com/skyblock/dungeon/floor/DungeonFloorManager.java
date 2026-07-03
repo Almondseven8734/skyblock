@@ -9,6 +9,7 @@ import com.skyblock.dungeon.gen.RoomGraph;
 import com.skyblock.dungeon.util.FloorBounds;
 import org.bukkit.World;
 
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentSkipListSet;
@@ -56,6 +57,23 @@ public final class DungeonFloorManager {
     public DungeonFloorManager(World dungeonWorld, FloorBounds floorBounds, FloorThemeRegistry themeRegistry,
                                 double floor1OriginX, double floor1OriginZ,
                                 Logger logger, java.util.Random random, DungeonCarveScheduler carveScheduler) {
+        this(dungeonWorld, floorBounds, themeRegistry, floor1OriginX, floor1OriginZ, logger, random,
+                carveScheduler, true);
+    }
+
+    /**
+     * @param autoInitializeFloor1 when true (the normal case), the
+     *        constructor immediately unlocks floor 1 and places a fresh
+     *        random boss room for it, exactly as before. Pass false when
+     *        the caller is about to call applySnapshot() with restored
+     *        state from a previous run - in that case a fresh random
+     *        boss room would just be discarded/replaced anyway, wasting
+     *        a real carve pass at a location nothing will ever use.
+     */
+    public DungeonFloorManager(World dungeonWorld, FloorBounds floorBounds, FloorThemeRegistry themeRegistry,
+                                double floor1OriginX, double floor1OriginZ,
+                                Logger logger, java.util.Random random, DungeonCarveScheduler carveScheduler,
+                                boolean autoInitializeFloor1) {
         this.dungeonWorld = dungeonWorld;
         this.floorBounds = floorBounds;
         this.themeRegistry = themeRegistry;
@@ -65,9 +83,75 @@ public final class DungeonFloorManager {
         this.random = random;
         this.carveScheduler = carveScheduler;
 
-        // Floor 1 is the only floor open at the start of the week.
-        unlockedFloors.add(1);
-        placeBossRoom(1, getOrCreatePlanner(1));
+        if (autoInitializeFloor1) {
+            // Floor 1 is the only floor open at the start of the week.
+            unlockedFloors.add(1);
+            placeBossRoom(1, getOrCreatePlanner(1));
+        }
+    }
+
+    /**
+     * Restores previously-persisted floor state (unlocked floors, boss
+     * rooms, carved chunks, staircase placements, boss-kill status) after
+     * a server restart. Must be called once, right after construction
+     * with autoInitializeFloor1=false, before any player can move or
+     * trigger generation. Order matters: carved chunks are restored
+     * BEFORE boss room carve jobs are (re-)enqueued, so already-carved
+     * boss room chunks are correctly skipped instead of re-carved.
+     */
+    public void applySnapshot(DungeonFloorStateStorage.FloorSnapshot snapshot) {
+        unlockedFloors.addAll(snapshot.unlockedFloors());
+
+        for (var entry : snapshot.bossRooms().entrySet()) {
+            int floor = entry.getKey();
+            DungeonFloorStateStorage.BossRoomRecord r = entry.getValue();
+            DungeonRoomPlanner planner = getOrCreatePlanner(floor);
+            DungeonRoom room = planner.registerBossRoom(r.x(), r.z(), r.radiusX(), r.radiusZ());
+            bossRooms.put(floor, room);
+        }
+
+        for (var entry : snapshot.carvedChunks().entrySet()) {
+            getOrCreatePlanner(entry.getKey()).restoreCarvedChunks(entry.getValue());
+        }
+
+        // Now safe to (re-)enqueue boss room carve scans: chunks already
+        // carved before the restart were just restored above, so this is
+        // a cheap no-op scan for them and only actually carves anything
+        // for a boss room that genuinely never finished carving.
+        for (Integer floor : snapshot.bossRooms().keySet()) {
+            DungeonRoom room = bossRooms.get(floor);
+            if (room != null) {
+                getOrCreatePlanner(floor).enqueueBossRoomAreaUrgent(dungeonWorld, room);
+            }
+        }
+
+        for (var entry : snapshot.staircases().entrySet()) {
+            getOrCreateStaircaseValidator(entry.getKey()).restorePlacements(entry.getValue());
+        }
+
+        for (Integer clearedFloor : snapshot.clearedFloors()) {
+            bossKillTracker.markFloorCleared(clearedFloor);
+        }
+
+        logger.info("[Dungeon] Restored persisted state: " + snapshot.unlockedFloors().size() + " floor(s) unlocked, "
+                + snapshot.bossRooms().size() + " boss room(s), "
+                + snapshot.carvedChunks().values().stream().mapToInt(Set::size).sum() + " carved chunk(s), "
+                + snapshot.staircases().values().stream().mapToInt(List::size).sum() + " staircase(s).");
+    }
+
+    /** Every floor number that currently has a registered boss room - used for state persistence. */
+    public Set<Integer> bossRoomFloors() {
+        return Set.copyOf(bossRooms.keySet());
+    }
+
+    /** Every floor number that currently has an active (created) planner - used for state persistence. */
+    public Set<Integer> activeFloorNumbers() {
+        return Set.copyOf(planners.keySet());
+    }
+
+    /** Every floor number that currently has a staircase validator - used for state persistence. */
+    public Set<Integer> staircaseValidatorFloors() {
+        return Set.copyOf(staircaseValidators.keySet());
     }
 
     // ─── Floor lifecycle ────────────────────────────────────────────────────

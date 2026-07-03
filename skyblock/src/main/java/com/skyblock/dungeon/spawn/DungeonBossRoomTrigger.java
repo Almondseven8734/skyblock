@@ -98,6 +98,19 @@ public final class DungeonBossRoomTrigger {
     }
 
     /**
+     * Marks a boss room's ID as already-triggered without actually
+     * spawning anything - used exclusively by DungeonFloorStateStorage
+     * when restoring state after a restart. triggeredRooms is transient
+     * (never persisted directly), so without this, a floor whose boss
+     * was killed before a crash would spawn a brand new boss the moment
+     * any player walked back into that room after the restart, since
+     * this trigger has no memory of the old kill.
+     */
+    public void markAlreadyTriggered(UUID roomId) {
+        triggeredRooms.add(roomId);
+    }
+
+    /**
      * Call on every player position update for players on this floor.
      * No-ops unless the player is actually inside the boss room and it
      * hasn't already triggered.

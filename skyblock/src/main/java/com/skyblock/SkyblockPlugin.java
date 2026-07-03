@@ -98,6 +98,8 @@ public class SkyblockPlugin extends JavaPlugin {
     private DungeonResetScheduler dungeonResetScheduler;
     private DungeonCarveScheduler dungeonCarveScheduler;
     private DungeonEntityVisibilityCuller dungeonEntityVisibilityCuller;
+    private com.skyblock.dungeon.floor.DungeonFloorStateStorage dungeonFloorStateStorage;
+    private com.skyblock.dungeon.floor.DungeonFloorManager dungeonFloorManagerRef;
 
     @Override
     public void onEnable() {
@@ -235,10 +237,29 @@ public class SkyblockPlugin extends JavaPlugin {
             dungeonCarveSchedulerLocal.start(this);
             this.dungeonCarveScheduler = dungeonCarveSchedulerLocal;
 
+            // Load whatever floor state (unlocked floors, boss rooms, carved
+            // chunks, staircases, boss-kill status) survived from before this
+            // startup - empty on a genuinely fresh world. See
+            // DungeonFloorStateStorage's class doc for why this exists: without
+            // it, every restart/crash silently wiped all of this and caused
+            // the dungeon to re-carve (and overwrite staircases/loot inside)
+            // areas players had already cleared.
+            com.skyblock.dungeon.floor.DungeonFloorStateStorage dungeonFloorStateStorageLocal =
+                new com.skyblock.dungeon.floor.DungeonFloorStateStorage(getDataFolder(), getLogger());
+            com.skyblock.dungeon.floor.DungeonFloorStateStorage.FloorSnapshot dungeonSnapshot =
+                dungeonFloorStateStorageLocal.load();
+            boolean dungeonFreshStart = dungeonSnapshot.unlockedFloors().isEmpty();
+            this.dungeonFloorStateStorage = dungeonFloorStateStorageLocal;
+
             DungeonFloorManager dungeonFloorManager = new DungeonFloorManager(
                 dungeonWorld, dungeonFloorBounds, dungeonThemeRegistry,
-                floor1OriginX, floor1OriginZ, getLogger(), dungeonRandom, dungeonCarveSchedulerLocal
+                floor1OriginX, floor1OriginZ, getLogger(), dungeonRandom, dungeonCarveSchedulerLocal,
+                dungeonFreshStart
             );
+            if (!dungeonFreshStart) {
+                dungeonFloorManager.applySnapshot(dungeonSnapshot);
+            }
+            this.dungeonFloorManagerRef = dungeonFloorManager;
 
             DungeonStaircaseOrchestrator dungeonStaircaseOrchestrator =
                 new DungeonStaircaseOrchestrator(dungeonFloorManager, getLogger(), dungeonRandom);
@@ -303,6 +324,19 @@ public class SkyblockPlugin extends JavaPlugin {
                 this, dungeonThemeRegistry, dungeonMobLevelRoller, dungeonMobLevelApplicator,
                 dungeonStaircaseOrchestrator, dungeonBossGateController, dungeonRandom
             );
+
+            // Restored floors whose boss was already dead before this restart
+            // must not let the boss room trigger spawn a brand new boss the
+            // moment a player walks back in - triggeredRooms is transient and
+            // has no memory of the old kill otherwise.
+            if (!dungeonFreshStart) {
+                for (Integer clearedFloor : dungeonFloorManager.bossKillTracker().clearedFloorNumbers()) {
+                    com.skyblock.dungeon.gen.DungeonRoom clearedBossRoom = dungeonFloorManager.getBossRoom(clearedFloor);
+                    if (clearedBossRoom != null) {
+                        dungeonBossRoomTrigger.markAlreadyTriggered(clearedBossRoom.id());
+                    }
+                }
+            }
 
             // Milestone floors (every 5th, per FloorThemeRegistry) get a real
             // scripted boss instead of silently falling back to buffed
@@ -382,11 +416,28 @@ public class SkyblockPlugin extends JavaPlugin {
                 dungeonPortalHandler.updatePortalBounds(newPortalCorner1, newPortalCorner2);
                 dungeonBlockProtectionListener.setDungeonWorld(newWorld);
 
+                // The weekly wipe makes all previously persisted floor state
+                // (carved chunks, staircases, boss rooms, cleared floors)
+                // meaningless - the world it describes no longer exists.
+                // Without this, the fresh floor 1 DungeonFloorManager.resetAll()
+                // just created would get immediately clobbered by the next
+                // autosave writing the OLD (pre-reset) snapshot back on top of it.
+                dungeonFloorStateStorageLocal.clear();
+
                 getLogger().info("[Dungeon] Hub rebuilt and entrance/portal/protection repointed at the new world.");
             });
 
             dungeonResetSchedulerLocal.start();
             this.dungeonResetScheduler = dungeonResetSchedulerLocal;
+
+            // Periodic autosave of floor generation state, independent of a
+            // clean shutdown - onDisable() never runs on a crash/kill, which
+            // is exactly the scenario this whole persistence layer exists
+            // for. Every 5 minutes caps how much progress a crash can lose.
+            final DungeonFloorManager dungeonFloorManagerForAutosave = dungeonFloorManager;
+            getServer().getScheduler().runTaskTimerAsynchronously(this, () -> {
+                dungeonFloorStateStorageLocal.save(dungeonFloorManagerForAutosave, dungeonFloorManagerForAutosave.bossKillTracker());
+            }, 20L * 60L * 5L, 20L * 60L * 5L);
 
             getCommand("dungeon").setExecutor(dungeonCommand);
             getCommand("class").setExecutor(dungeonClassCommand);
@@ -499,6 +550,9 @@ public class SkyblockPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (dungeonFloorStateStorage != null && dungeonFloorManagerRef != null) {
+            dungeonFloorStateStorage.save(dungeonFloorManagerRef, dungeonFloorManagerRef.bossKillTracker());
+        }
         if (dungeonResetScheduler != null) {
             dungeonResetScheduler.cancel();
         }

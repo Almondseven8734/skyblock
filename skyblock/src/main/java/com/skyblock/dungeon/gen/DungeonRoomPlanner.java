@@ -109,6 +109,29 @@ public final class DungeonRoomPlanner {
         return graph;
     }
 
+    /**
+     * Snapshot of every chunk key currently marked carved-or-queued.
+     * Used by DungeonFloorStateStorage to persist generation progress
+     * so a restart doesn't forget what's already been carved.
+     */
+    public Set<Long> carvedChunkKeys() {
+        return Set.copyOf(carvedChunks);
+    }
+
+    /**
+     * Re-seeds the carved-chunk set from a persisted snapshot, BEFORE
+     * any player can call planAndCarveNear() again. This is what stops
+     * planAndCarveNear() from re-queuing (and re-carving, overwriting
+     * whatever players already built/looted/staircased) chunks that
+     * were already carved before a crash or restart - previously this
+     * set started empty every time the plugin loaded, with nothing
+     * that told it those chunks already existed on disk, which is the
+     * root cause of "the dungeon rebuilds previously built sections."
+     */
+    public void restoreCarvedChunks(Collection<Long> keys) {
+        carvedChunks.addAll(keys);
+    }
+
     // ─── Boss / buffer room registration ────────────────────────────────────
 
     public DungeonRoom registerBossRoom(int x, int z, int radiusX, int radiusZ) {

@@ -55,6 +55,23 @@ public final class BossKillTracker {
         return clearedFloors.getOrDefault(floorNumber, false);
     }
 
+    /**
+     * Marks a floor as cleared without going through recordBossKill -
+     * used exclusively by DungeonFloorStateStorage when restoring state
+     * after a restart/crash. If floor N+1 was unlocked before the crash,
+     * floor N's boss MUST already be dead (unlockFloor only ever gets
+     * called from the "just cleared" branch), so this lets the restore
+     * path re-establish that fact without a fake death event.
+     */
+    public void markFloorCleared(int floorNumber) {
+        clearedFloors.put(floorNumber, true);
+    }
+
+    /** Every floor number currently recorded as cleared - used for state persistence. */
+    public Set<Integer> clearedFloorNumbers() {
+        return Set.copyOf(clearedFloors.keySet());
+    }
+
     public int getKillCount(int floorNumber) {
         AtomicInteger count = killsByFloor.get(floorNumber);
         return count == null ? 0 : count.get();

@@ -58,6 +58,17 @@ public final class StaircasePlacementValidator {
         placedStaircases.add(new double[]{x, z});
     }
 
+    /**
+     * Bulk-restores previously accepted staircase locations from a
+     * persisted snapshot (server restart/crash) so future placements on
+     * this floor still respect MIN_STAIRCASE_SEPARATION against
+     * staircases that existed before the restart, not just ones placed
+     * in the current process lifetime.
+     */
+    public void restorePlacements(List<double[]> coords) {
+        placedStaircases.addAll(coords);
+    }
+
     public int placedCount() {
         return placedStaircases.size();
     }

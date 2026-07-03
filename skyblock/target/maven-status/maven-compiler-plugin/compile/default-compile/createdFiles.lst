@@ -13,6 +13,7 @@ com/skyblock/shop/ShopSystem$MenuType.class
 com/skyblock/ah/AhStorage$2.class
 com/skyblock/dungeon/drops/DungeonDropRegistry$Adjective.class
 com/skyblock/commands/FlyCommand.class
+com/skyblock/dungeon/floor/DungeonFloorStateStorage.class
 com/skyblock/shop/ShopSystem$ShopCategory.class
 com/skyblock/ah/AhStorage$AhItemData.class
 com/skyblock/fishing/FishingSystemV4.class
@@ -56,6 +57,7 @@ com/skyblock/dungeon/classes/WeaponSkillListener.class
 com/skyblock/dungeon/floor/DungeonPlayerState.class
 com/skyblock/island/IslandCommands$Pending.class
 com/skyblock/shop/AdminShopSystem$Session.class
+com/skyblock/dungeon/floor/DungeonFloorStateStorage$BossRoomRecord.class
 com/skyblock/island/IslandPortal$1.class
 com/skyblock/dungeon/drops/DungeonMobDropListener.class
 com/skyblock/ah/AhStorage$CollectionEntry.class
@@ -85,6 +87,7 @@ com/skyblock/island/InviteSystem$InviteEntry.class
 com/skyblock/shop/SellTrashSystem$SellCategory.class
 com/skyblock/ah/AhStorage$EnchantData.class
 com/skyblock/dungeon/items/ItemAffix.class
+com/skyblock/dungeon/floor/DungeonFloorStateStorage$FloorSnapshot.class
 com/skyblock/dungeon/floor/DungeonResetScheduler$ChunkGeneratorFactory.class
 com/skyblock/pwarp/PwarpSystem.class
 com/skyblock/island/IslandMenu$InputMode.class

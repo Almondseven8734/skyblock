@@ -34,12 +34,27 @@ import java.util.logging.Logger;
  */
 public final class DungeonStaircaseOrchestrator implements Listener {
 
-    /** Random range for how many staircases spawn when a floor clears. */
-    private static final int MIN_STAIRCASES = 3;
-    private static final int MAX_STAIRCASES = 8;
+    /**
+     * Random range for how many staircases spawn when a floor clears.
+     * Previously 3-8, which combined with the ~2000-block generation
+     * leash meant staircases were a needle-in-a-haystack find on foot -
+     * that's the actual reason none turned up in playtests, not a
+     * placement bug. ~100 spreads enough of them around that players
+     * exploring a cleared floor have a realistic chance of running into
+     * one without walking the entire leash radius.
+     */
+    private static final int MIN_STAIRCASES = 90;
+    private static final int MAX_STAIRCASES = 110;
 
-    /** How many candidate points to try per staircase before giving up on that slot. */
-    private static final int MAX_PLACEMENT_ATTEMPTS_PER_STAIRCASE = 50;
+    /**
+     * How many candidate points to try per staircase before giving up on
+     * that slot. Raised from 50 alongside the staircase count bump: with
+     * ~100 targets all needing 40+ blocks of separation from each other,
+     * later staircases in the batch have far fewer valid open slots left
+     * among already-carved rooms, so they need more attempts to still
+     * reliably land one.
+     */
+    private static final int MAX_PLACEMENT_ATTEMPTS_PER_STAIRCASE = 150;
 
     private final DungeonFloorManager floorManager;
     private final Logger logger;
@@ -130,7 +145,29 @@ public final class DungeonStaircaseOrchestrator implements Listener {
         }
 
         logger.info("[Dungeon] Floor " + floorNumber + ": placed " + placed + "/" + targetCount + " staircases.");
+        logSampleCoordinates(floorNumber, validator);
         unlockNextFloor(floorNumber);
+    }
+
+    /**
+     * Logs a handful of the staircases just placed so their real
+     * in-world coordinates are easy to find in the server log for
+     * verification, instead of having to stumble onto one on foot.
+     */
+    private void logSampleCoordinates(int floorNumber, StaircasePlacementValidator validator) {
+        List<double[]> all = validator.getPlacedStaircases();
+        if (all.isEmpty()) return;
+        int sampleSize = Math.min(5, all.size());
+        List<double[]> shuffled = new ArrayList<>(all);
+        java.util.Collections.shuffle(shuffled, random);
+        StringBuilder sb = new StringBuilder("[Dungeon] Floor " + floorNumber + " sample staircase coords: ");
+        for (int i = 0; i < sampleSize; i++) {
+            double[] c = shuffled.get(i);
+            int borderY = floorManager.floorBounds().floorBottomY(floorNumber) - 1;
+            sb.append(String.format("(%.0f, %d, %.0f)", c[0], borderY, c[1]));
+            if (i < sampleSize - 1) sb.append(", ");
+        }
+        logger.info(sb.toString());
     }
 
     /**

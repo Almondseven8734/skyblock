@@ -39,6 +39,7 @@
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/drops/DungeonMobDropListener.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/floor/BossKillTracker.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/floor/DungeonFloorManager.java
+/workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/floor/DungeonFloorStateStorage.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/floor/DungeonHubBuilder.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/floor/DungeonPlayerState.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/floor/DungeonPlayerStateStorage.java
