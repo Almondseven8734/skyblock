@@ -35,6 +35,15 @@ public final class MobLevelApplicator {
     private static final double SPEED_SCALE_PER_LEVEL = 0.003;
     private static final double MAX_SPEED_MULTIPLIER = 1.75;
 
+    /**
+     * Flat multiplier applied on top of the per-level health curve for
+     * every dungeon mob (ambient and boss alike) - a blanket "mobs are
+     * tankier" pass requested independently of the level-based scaling
+     * above. Deliberately health-only: damage/speed keep their existing
+     * per-level curves so this doesn't also make every mob hit 5x harder.
+     */
+    private static final double FLAT_HEALTH_MULTIPLIER = 5.0;
+
     /** Mob types that render visible humanoid equipment slots - only these get gear on spawn. */
     private static final Set<EntityType> GEARABLE_TYPES = EnumSet.of(
         EntityType.ZOMBIE, EntityType.HUSK, EntityType.DROWNED, EntityType.ZOMBIE_VILLAGER,
@@ -98,7 +107,7 @@ public final class MobLevelApplicator {
     private void scaleStats(LivingEntity entity, int level, double extraMultiplier) {
         double levelFactor = (level - 1); // 0 at level 1
 
-        double healthMultiplier = (1.0 + levelFactor * HEALTH_SCALE_PER_LEVEL) * extraMultiplier;
+        double healthMultiplier = (1.0 + levelFactor * HEALTH_SCALE_PER_LEVEL) * extraMultiplier * FLAT_HEALTH_MULTIPLIER;
         double damageMultiplier = (1.0 + levelFactor * DAMAGE_SCALE_PER_LEVEL) * extraMultiplier;
         double speedMultiplier = Math.min(1.0 + levelFactor * SPEED_SCALE_PER_LEVEL, MAX_SPEED_MULTIPLIER);
 

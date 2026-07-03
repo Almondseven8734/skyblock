@@ -165,6 +165,7 @@ com/skyblock/vault/VaultStorage$1.class
 com/skyblock/tpa/TpaSystem.class
 com/skyblock/admin/AdminSystem$2.class
 com/skyblock/dungeon/items/ItemLevelGateListener$1.class
+com/skyblock/dungeon/listener/DungeonMobSuffocationGuard.class
 com/skyblock/admin/AdminSystem$AdminPerm.class
 com/skyblock/dungeon/items/ItemCombatStatsListener.class
 com/skyblock/util/GuiBuilder$Session.class
@@ -183,6 +184,7 @@ com/skyblock/shop/ShopSystem.class
 com/skyblock/dungeon/progression/CharacterLevelCurve.class
 com/skyblock/dungeon/command/DungeonCommand.class
 com/skyblock/vault/VaultStorage.class
+com/skyblock/dungeon/spawn/DungeonEntityVisibilityCuller.class
 com/skyblock/shop/GemshopSystem$ShopEntry.class
 com/skyblock/dungeon/combat/MobLevelApplicator.class
 com/skyblock/fishing/FishingSystemV4$FishEntry.class

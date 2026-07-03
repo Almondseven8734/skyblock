@@ -67,6 +67,7 @@
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/listener/DungeonDeathHandler.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/listener/DungeonFrontierListener.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/listener/DungeonJoinQuitListener.java
+/workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/listener/DungeonMobSuffocationGuard.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/listener/DungeonPortalHandler.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/loot/DungeonLootTable.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/loot/DungeonRarity.java
@@ -77,6 +78,7 @@
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/progression/PlayerProgressionStorage.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/spawn/DungeonBossRoomTrigger.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/spawn/DungeonChestRoomPlacer.java
+/workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/spawn/DungeonEntityVisibilityCuller.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/spawn/DungeonRoomMobSpawner.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/spawn/DungeonSpawnLocator.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/util/DungeonCommandLockdown.java

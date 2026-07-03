@@ -50,6 +50,13 @@ public final class DungeonMobDropListener implements Listener {
         if (mobLevel < 0) {
             return; // not a dungeon mob
         }
+
+        // Dungeon mobs never drop vanilla loot (rotten flesh, string, bones,
+        // etc.) - only the custom sellable/gear tables below - regardless
+        // of what killed them or whether this death rolls custom loot at all.
+        event.getDrops().clear();
+        event.setDroppedExp(0);
+
         if (!(victim.getKiller() instanceof Player)) {
             return; // only player kills drop sellable loot
         }

@@ -61,6 +61,7 @@ import com.skyblock.dungeon.listener.DungeonCommandLockdownListener;
 import com.skyblock.dungeon.listener.DungeonDeathHandler;
 import com.skyblock.dungeon.listener.DungeonFrontierListener;
 import com.skyblock.dungeon.listener.DungeonJoinQuitListener;
+import com.skyblock.dungeon.listener.DungeonMobSuffocationGuard;
 import com.skyblock.dungeon.listener.DungeonPortalHandler;
 import com.skyblock.dungeon.classes.ClassCommand;
 import com.skyblock.dungeon.classes.ClassSkillRegistry;
@@ -81,6 +82,7 @@ import com.skyblock.guild.GuildCommand;
 import com.skyblock.guild.GuildInviteManager;
 import com.skyblock.guild.GuildStorage;
 import com.skyblock.dungeon.spawn.DungeonChestRoomPlacer;
+import com.skyblock.dungeon.spawn.DungeonEntityVisibilityCuller;
 import com.skyblock.dungeon.spawn.DungeonRoomMobSpawner;
 import com.skyblock.dungeon.util.FloorBounds;
 import org.bukkit.Location;
@@ -95,6 +97,7 @@ public class SkyblockPlugin extends JavaPlugin {
 
     private DungeonResetScheduler dungeonResetScheduler;
     private DungeonCarveScheduler dungeonCarveScheduler;
+    private DungeonEntityVisibilityCuller dungeonEntityVisibilityCuller;
 
     @Override
     public void onEnable() {
@@ -244,7 +247,8 @@ public class SkyblockPlugin extends JavaPlugin {
                 new MobLevelRoller(dungeonFloorBounds.maxFloorCount(), dungeonRandom);
             MobLevelApplicator dungeonMobLevelApplicator = new MobLevelApplicator(this);
             DungeonRoomMobSpawner dungeonMobSpawner = new DungeonRoomMobSpawner(
-                this, dungeonThemeRegistry, dungeonMobLevelRoller, dungeonMobLevelApplicator, dungeonRandom
+                this, dungeonThemeRegistry, dungeonMobLevelRoller, dungeonMobLevelApplicator, dungeonRandom,
+                dungeonFloorManager
             );
             PlayerProgressionStorage dungeonProgressionStorage =
                 new PlayerProgressionStorage(getDataFolder(), getLogger());
@@ -275,6 +279,19 @@ public class SkyblockPlugin extends JavaPlugin {
                 dungeonMobLevelApplicator, dungeonDropRegistry, dungeonDropItemFactory,
                 new DungeonRarityRoller(dungeonRandom), dungeonFloorBounds, dungeonRandom
             );
+
+            // Stops dungeon mobs from dying to suffocation-in-terrain while
+            // async carving catches up to a spot they've spawned in.
+            DungeonMobSuffocationGuard dungeonMobSuffocationGuard =
+                new DungeonMobSuffocationGuard(dungeonMobLevelApplicator);
+
+            // Client-side-only mob hiding beyond 10 blocks / behind terrain,
+            // now that the 3x spawn-rate pass means far more ambient mobs
+            // are alive per floor at once.
+            DungeonEntityVisibilityCuller dungeonEntityVisibilityCullerLocal =
+                new DungeonEntityVisibilityCuller(this, dungeonFloorManager, dungeonMobLevelApplicator);
+            dungeonEntityVisibilityCullerLocal.start();
+            this.dungeonEntityVisibilityCuller = dungeonEntityVisibilityCullerLocal;
 
             GuildStorage guildStorage = new GuildStorage(getDataFolder(), getLogger());
             GuildInviteManager guildInviteManager = new GuildInviteManager();
@@ -385,6 +402,7 @@ public class SkyblockPlugin extends JavaPlugin {
             pm.registerEvents(dungeonItemLevelGateListener, this);
             pm.registerEvents(dungeonItemCombatStatsListener, this);
             pm.registerEvents(dungeonMobDropListener, this);
+            pm.registerEvents(dungeonMobSuffocationGuard, this);
             pm.registerEvents(dungeonFrontierListener, this);
             pm.registerEvents(dungeonChestLootListener, this);
             pm.registerEvents(dungeonBlockProtectionListener, this);
@@ -485,6 +503,9 @@ public class SkyblockPlugin extends JavaPlugin {
         }
         if (dungeonCarveScheduler != null) {
             dungeonCarveScheduler.stop();
+        }
+        if (dungeonEntityVisibilityCuller != null) {
+            dungeonEntityVisibilityCuller.stop();
         }
         getLogger().info("[SkyblockPlugin] Plugin disabled.");
     }
