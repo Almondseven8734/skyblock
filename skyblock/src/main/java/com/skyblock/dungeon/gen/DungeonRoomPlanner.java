@@ -203,22 +203,62 @@ public final class DungeonRoomPlanner {
     // ─── Boss / buffer room registration ────────────────────────────────────
 
     /**
-     * Registers a boss room. With the preplanned graph, a BOSS-type
-     * room already exists (placed by DungeonGraphPlanner) - if one is
-     * found near (x,z) it's returned as-is so callers get the SAME room
-     * object the graph already carves via SDF, rather than a second,
-     * conflicting BOSS room object. Falls back to creating a legacy
-     * plain-footprint BOSS room (carved via the drum-cylinder path, see
-     * carveChunkColumn) only if no matching planned room exists nearby.
+     * The graph's own designated boss room - the single BOSS-type room
+     * DungeonGraphPlanner placed as part of this floor's preplanned
+     * graph (on a corridor branch, connected, carved via SDF). This is
+     * "the" boss room for the floor; callers should use this instead of
+     * ever rolling/registering a second, independent BOSS room, which
+     * previously caused two boss rooms to exist simultaneously (one
+     * graph-integrated and correctly placed, one legacy/random and
+     * often landing right next to spawn) with only one of them actually
+     * getting boss-spawn logic applied.
+     *
+     * Returns null only if this planner didn't plan a fresh graph (i.e.
+     * the graph was already populated when this planner was
+     * constructed, meaning some earlier planner/instance owns the
+     * planned boss room already) - in practice every real call path
+     * goes through a planner that either just planned fresh or is
+     * looking at a graph a fresh-planning planner already populated, so
+     * graph.nearestBossRoomWithin can also be used as a fallback lookup
+     * for that case (see registerBossRoom below, used by snapshot
+     * restore).
+     */
+    public DungeonRoom plannedBossRoom() {
+        if (plannedGraph != null && plannedGraph.bossRoom != null) {
+            return plannedGraph.bossRoom;
+        }
+        return null;
+    }
+
+    /**
+     * Resolves a boss room by proximity to a previously-persisted
+     * (x, z) location - used exclusively by DungeonFloorStateStorage's
+     * restore path, where the boss room's real position is whatever
+     * the graph freshly planned this run (see DungeonGraphPlanner's
+     * planFloor - it isn't currently seeded deterministically, so a
+     * restored coordinate is a best-effort proximity hint, not a
+     * guaranteed exact match). This does NOT create a second BOSS room
+     * on a miss - it strictly returns the graph's own planned boss room
+     * (or the nearest existing BOSS room in the graph) so the
+     * "two boss rooms" bug can't reoccur via the restore path either.
      */
     public DungeonRoom registerBossRoom(int x, int z, int radiusX, int radiusZ) {
         DungeonRoom existing = graph.nearestBossRoomWithin(x, z, Math.max(radiusX, radiusZ) + 64);
         if (existing != null) {
             return existing;
         }
-        DungeonRoom room = new DungeonRoom(UUID.randomUUID(), x, z, radiusX, radiusZ, DungeonRoom.Type.BOSS);
-        graph.addRoom(room);
-        return room;
+        DungeonRoom planned = plannedBossRoom();
+        if (planned != null) {
+            return planned;
+        }
+        // Last resort: scan the whole graph for any BOSS room at all,
+        // rather than ever fabricating a brand new one.
+        for (DungeonRoom room : graph.allRooms()) {
+            if (room.type() == DungeonRoom.Type.BOSS) {
+                return room;
+            }
+        }
+        return null;
     }
 
     public DungeonRoom registerBufferRoom(int x, int z) {

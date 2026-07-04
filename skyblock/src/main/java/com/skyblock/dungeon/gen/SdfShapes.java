@@ -116,14 +116,27 @@ public final class SdfShapes {
     private static final double JUNCTION_FLAT = 4.0;
 
     /**
+     * How far below the connecting rooms' floor plane the tunnel's
+     * centerline is allowed to dip at its deepest (dxz == 0), in
+     * blocks. Matches the "belly" feel of irregularRoomSDF's curved
+     * bottom instead of the old flat py < floorY cutoff.
+     */
+    private static final double TUNNEL_FLOOR_BOWL_DEPTH = 2.5;
+
+    /**
      * True if (px,py,pz) falls inside the arched tunnel passage running
      * from (ax,ay,az) to (bx,by,bz) with half-width r. The passage's
-     * cross-section is a flat-ish floor (with a short flattened
-     * "junction" landing at each end, so it meets room floors cleanly)
-     * and a cosine-profile arched ceiling whose peak height scales with
-     * the tunnel's own radius - so a wide tunnel (carved with a radius
-     * close to its connected rooms' size, per design) gets a
-     * correspondingly tall arch instead of a fixed-height crawlspace.
+     * cross-section floor is a shallow, curved bowl - lowest along the
+     * tunnel's centerline and rising back up to meet the base floor
+     * plane at the tunnel walls (dxz == halfW) - so it reads as
+     * continuous with a room's curved bottom (see irregularRoomSDF)
+     * instead of the old flat plane. A short flattened "junction"
+     * landing still applies at each end so the bowl doesn't undercut
+     * the room floors it connects to. The ceiling is unchanged: a
+     * cosine-profile arch whose peak height scales with the tunnel's
+     * own radius, so a wide tunnel (carved with a radius close to its
+     * connected rooms' size, per design) gets a correspondingly tall
+     * arch instead of a fixed-height crawlspace.
      */
     public static boolean tunnelArchSDF(int px, int py, int pz,
                                          double ax, double ay, double az,
@@ -140,14 +153,24 @@ public final class SdfShapes {
         double dxz = Math.sqrt((px - cx2) * (px - cx2) + (pz - cz2) * (pz - cz2));
         if (dxz > halfW) return false;
 
-        double floorY;
+        double baseFloorY;
         if (segLen < 1) {
-            floorY = Math.min(ay, by);
+            baseFloorY = Math.min(ay, by);
         } else {
             double flatFrac = JUNCTION_FLAT / segLen;
             double tFloor = tClamped < flatFrac ? 0 : tClamped > 1 - flatFrac ? 1 : tClamped;
-            floorY = Math.floor(ay + tFloor * (by - ay));
+            baseFloorY = Math.floor(ay + tFloor * (by - ay));
         }
+
+        // Curved bowl floor: deepest at the centerline (dxz = 0),
+        // easing back up to baseFloorY at the walls (dxz = halfW), so
+        // the tunnel floor matches the belly of the rooms it connects
+        // instead of cutting off flat.
+        double bowlFrac = 1.0 - Math.min(1.0, dxz / halfW); // 1 at center, 0 at wall
+        double bowlNoise = smoothNoise2(px * 0.5, pz * 0.5, 4.0) * 0.3;
+        double bowlDepth = TUNNEL_FLOOR_BOWL_DEPTH * (1.0 + bowlNoise) * bowlFrac * bowlFrac;
+        double floorY = baseFloorY - bowlDepth;
+
         if (py < floorY) return false;
 
         double cosProfile = Math.cos((dxz / halfW) * (Math.PI / 2));

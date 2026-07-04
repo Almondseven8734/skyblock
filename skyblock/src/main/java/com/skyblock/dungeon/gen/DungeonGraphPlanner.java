@@ -53,6 +53,16 @@ public final class DungeonGraphPlanner {
     private static final int MIN_SEG_LEN = 5;
 
     /**
+     * Minimum straight-line distance (blocks) the boss room's parent
+     * must be from the entrance for it to be eligible for the boss
+     * branch. Measured from the entrance itself, not the floor's
+     * origin point, since those can differ significantly (the entrance
+     * sits near the edge of the origin-centered disc) - see planFloor's
+     * boss-room placement comment.
+     */
+    private static final double MIN_BOSS_DISTANCE_FROM_ENTRANCE = FloorBounds.GENERATION_RADIUS * 0.5;
+
+    /**
      * Rooms-per-unit-area target, calibrated against the beta's 18-28
      * rooms over a 200x200 = 40,000 block^2 box (i.e. ~0.00055-0.0007
      * rooms per block^2). We use the midpoint of that range.
@@ -169,41 +179,128 @@ public final class DungeonGraphPlanner {
         bridgeDisconnectedPockets(graph, placed);
 
         // ── Boss room ─────────────────────────────────────────────────────
-        // Placed last, far from the entrance (biased toward the edge of
-        // the disc) and attached to whichever placed room ends up nearest,
-        // exactly like the old system's registerBossRoom callers expected
-        // - so DungeonBossRoomGeometry/DungeonBossGateController/
-        // DungeonBossRoomTrigger all keep working unchanged against this
-        // planned BOSS-type room.
-        DungeonRoom nearestToEdge = null;
-        double bestEdgeDist = -1;
+        // Placed last, attached to whichever placed room ends up
+        // FARTHEST FROM THE ENTRANCE (not farthest from the floor's
+        // origin point - those are not the same thing: the entrance
+        // itself sits near the edge of the origin-centered disc, per
+        // DungeonHubBuilder.gatewayPoint, so a room could have a large
+        // distance-from-origin while still being right next to the
+        // entrance; picking by distance-from-origin was the bug behind
+        // boss rooms occasionally landing next to spawn).
+        //
+        // We also don't just take the single farthest room - that can
+        // be an isolated one-off dead-end branch tens of blocks off the
+        // main body of the graph, which produces a boss corridor that
+        // has to cut across empty space to reach it rather than reading
+        // as a natural continuation of the dungeon. Instead we collect
+        // every room at least MIN_BOSS_DISTANCE_FROM_ENTRANCE away and
+        // pick among the ones with the most existing connections
+        // (rooms deep in a well-grown branch), so the boss corridor
+        // extends an already-substantial branch instead of reaching for
+        // an outlier.
+        double distFromEntrance = 0;
+        DungeonRoom bossParent = null;
+        double bestScore = -1;
         for (DungeonRoom r : placed) {
-            double d = Math.hypot(r.centerX() - originX, r.centerZ() - originZ);
-            if (d > bestEdgeDist) {
-                bestEdgeDist = d;
-                nearestToEdge = r;
+            if (r == entrance) continue;
+            double d = Math.hypot(r.centerX() - entrance.centerX(), r.centerZ() - entrance.centerZ());
+            if (d < MIN_BOSS_DISTANCE_FROM_ENTRANCE) continue;
+            // Prefer well-connected rooms deep in a branch over isolated
+            // outliers; break ties by favoring greater distance.
+            double score = r.connectedRoomIds().size() * 1000.0 + d;
+            if (score > bestScore) {
+                bestScore = score;
+                bossParent = r;
+                distFromEntrance = d;
             }
         }
-        DungeonRoom bossParent = nearestToEdge != null ? nearestToEdge : entrance;
-        double bossAngle = Math.atan2(bossParent.centerZ() - originZ, bossParent.centerX() - originX);
-        double bossDist = Math.min(radius - 20, bestEdgeDist + 40);
-        double bossX = originX + Math.cos(bossAngle) * bossDist;
-        double bossZ = originZ + Math.sin(bossAngle) * bossDist;
+        if (bossParent == null) {
+            // Floor's spanning tree never grew far enough (extremely
+            // small/degenerate floor) - fall back to whatever room is
+            // simply farthest from the entrance, even if under the
+            // preferred minimum distance, rather than defaulting to the
+            // entrance itself.
+            for (DungeonRoom r : placed) {
+                if (r == entrance) continue;
+                double d = Math.hypot(r.centerX() - entrance.centerX(), r.centerZ() - entrance.centerZ());
+                if (d > distFromEntrance) {
+                    distFromEntrance = d;
+                    bossParent = r;
+                }
+            }
+            if (bossParent == null) {
+                bossParent = entrance;
+            }
+        }
+
+        // Place the boss room further out along the ENTRANCE -> bossParent
+        // direction (not re-projected from the floor's origin point).
+        // Projecting from origin was the actual remaining bug: origin
+        // sits roughly BETWEEN the entrance and the far side of the
+        // disc, so a room picked for being far from the entrance could
+        // easily have an origin-relative angle that points back toward
+        // the entrance's side of the disc, re-placing the boss room
+        // right next to spawn every time regardless of which room was
+        // picked as bossParent. Projecting from the entrance itself
+        // guarantees monotonically increasing distance-from-entrance as
+        // we push bossDist further out.
+        double dirX = bossParent.centerX() - entrance.centerX();
+        double dirZ = bossParent.centerZ() - entrance.centerZ();
+        if (Math.hypot(dirX, dirZ) < 1) {
+            dirX = 1;
+            dirZ = 0;
+        }
+        double bossAngle = Math.atan2(dirZ, dirX);
+        double bossDist = distFromEntrance + 40; // push just past bossParent, same direction
+
+        double bossX = entrance.centerX() + Math.cos(bossAngle) * bossDist;
+        double bossZ = entrance.centerZ() + Math.sin(bossAngle) * bossDist;
+
+        // Clamp back inside the floor's generation disc (measured from
+        // ORIGIN, since that's what floor bounds/carving actually use)
+        // in case projecting from the entrance pushed it outside.
+        double fromOriginX = bossX - originX;
+        double fromOriginZ = bossZ - originZ;
+        double fromOriginDist = Math.hypot(fromOriginX, fromOriginZ);
+        double maxFromOrigin = radius - 20;
+        if (fromOriginDist > maxFromOrigin) {
+            double scale = maxFromOrigin / fromOriginDist;
+            bossX = originX + fromOriginX * scale;
+            bossZ = originZ + fromOriginZ * scale;
+        }
 
         DungeonRoom bossRoom = new DungeonRoom(UUID.randomUUID(),
                 (int) Math.round(bossX), (int) Math.round(bossZ),
                 26, 26, DungeonRoom.Type.BOSS,
                 floorMidY, 14, rng.nextInt());
         graph.addRoom(bossRoom);
+
+        // Route the boss corridor through a short mid-point waypoint
+        // rather than one raw straight segment, so it reads as a
+        // natural continuation of bossParent's branch instead of a
+        // beeline that can clip across unrelated rooms/terrain. The
+        // waypoint is offset perpendicular to the direct line by a
+        // small random jog, matching the organic bends ordinary
+        // corridors get from their own waypoint lists.
+        int midX = (bossParent.centerX() + bossRoom.centerX()) / 2;
+        int midZ = (bossParent.centerZ() + bossRoom.centerZ()) / 2;
+        double perpAngle = bossAngle + Math.PI / 2;
+        double jog = (rng.nextDouble() - 0.5) * 24;
+        midX += (int) Math.round(Math.cos(perpAngle) * jog);
+        midZ += (int) Math.round(Math.sin(perpAngle) * jog);
+
         DungeonCorridor bossCorridor = new DungeonCorridor(UUID.randomUUID(), bossParent.id(), bossRoom.id(),
-                List.of(new int[]{bossParent.centerX(), bossParent.centerZ()}, new int[]{bossRoom.centerX(), bossRoom.centerZ()}),
+                List.of(new int[]{bossParent.centerX(), bossParent.centerZ()},
+                        new int[]{midX, midZ},
+                        new int[]{bossRoom.centerX(), bossRoom.centerZ()}),
                 8);
         graph.addCorridor(bossCorridor);
 
         if (logger != null) {
             double ms = (System.nanoTime() - startNanos) / 1_000_000.0;
             logger.info("[Dungeon] Floor " + floorNumber + " graph planned: " + graph.roomCount()
-                    + " rooms in " + String.format("%.1f", ms) + "ms (target was " + targetRooms + ")");
+                    + " rooms in " + String.format("%.1f", ms) + "ms (target was " + targetRooms
+                    + "), boss room " + String.format("%.0f", distFromEntrance) + " blocks from entrance");
         }
 
         return new PlannedGraph(graph, entrance, bossRoom);

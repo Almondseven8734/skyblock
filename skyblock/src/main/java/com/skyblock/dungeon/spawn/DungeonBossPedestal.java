@@ -5,13 +5,14 @@ import org.bukkit.World;
 
 /**
  * Builds the physical pedestal a floor boss spawns standing on: a
- * flat, 1-block-thick, 4-block-radius disc of smooth stone laid into
- * the floor layer directly beneath the boss's spawn column, replacing
- * whatever themed floor block was there. Purely cosmetic/positional -
- * it doesn't change collision height (the boss still stands at the
- * same verified-open Y DungeonSpawnLocator found), it just makes that
- * spot visibly read as "a boss stands here" rather than blending into
- * the surrounding cave floor.
+ * flat, 1-block-thick, 4-block-radius disc of smooth stone built as a
+ * raised dais one block above the surrounding room floor, replacing
+ * whatever themed floor block was there at that raised layer. Raised
+ * (rather than flush with the floor) so it actually reads as a visible
+ * "a boss stands here" platform instead of just re-texturing the floor
+ * block under the boss's feet. The caller is responsible for spawning
+ * the boss one block above standY (i.e. standing on top of the dais,
+ * not embedded in it) - see DungeonBossRoomTrigger.
  */
 public final class DungeonBossPedestal {
 
@@ -23,12 +24,13 @@ public final class DungeonBossPedestal {
 
     /**
      * @param world   the dungeon world
-     * @param standX  X of the block the boss stands on top of
-     * @param standY  Y the boss's feet occupy (the pedestal is carved one layer below this)
-     * @param standZ  Z of the block the boss stands on top of
+     * @param standX  X of the room floor's stand column (dais center)
+     * @param standY  Y of the room floor (the dais disc is built AT this layer, one block above the old
+     *                floor-flush placement, so it's a visibly raised platform; the boss stands at standY + 1)
+     * @param standZ  Z of the room floor's stand column (dais center)
      */
     public static void build(World world, int standX, int standY, int standZ) {
-        int platformY = standY - 1;
+        int platformY = standY;
         int radiusSquared = RADIUS * RADIUS;
         for (int dx = -RADIUS; dx <= RADIUS; dx++) {
             for (int dz = -RADIUS; dz <= RADIUS; dz++) {

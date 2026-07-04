@@ -177,13 +177,21 @@ public final class DungeonBossRoomTrigger {
         }
 
         EntityType type = pickBossEntityType(theme);
-        // Build the pedestal (4-block-radius, 1-block-thick smooth stone
-        // disc) directly under the spot the boss will stand, before the
-        // entity spawns, so it's never seen popping in after the fact.
-        DungeonBossPedestal.build(world, (int) Math.floor(spawnLoc.getX()), spawnLoc.getBlockY(),
-                (int) Math.floor(spawnLoc.getZ()));
+        // Build the pedestal (4-block-radius smooth stone dais) as a
+        // visible raised platform one block above the surrounding room
+        // floor - not flush with it - so it actually reads as "a boss
+        // stands here" instead of just re-texturing the floor block
+        // under the boss's feet. DungeonBossPedestal.build raises the
+        // disc to standY (one block above the old standY - 1) and the
+        // boss's own spawn point is raised to match (standY + 1) so it
+        // stands on top of the dais rather than floating or embedded.
+        int standX = (int) Math.floor(spawnLoc.getX());
+        int standY = spawnLoc.getBlockY();
+        int standZ = (int) Math.floor(spawnLoc.getZ());
+        DungeonBossPedestal.build(world, standX, standY, standZ);
+        Location bossSpawnLoc = new Location(world, spawnLoc.getX(), standY + 1, spawnLoc.getZ());
 
-        if (!(world.spawnEntity(spawnLoc, type) instanceof LivingEntity entity)) {
+        if (!(world.spawnEntity(bossSpawnLoc, type) instanceof LivingEntity entity)) {
             return;
         }
 
@@ -241,13 +249,32 @@ public final class DungeonBossRoomTrigger {
     }
 
     /**
-     * Finds a verified-open, standable column within the boss room rather
-     * than trusting its bounding box - the room's radius describes graph
-     * bookkeeping, not the real noise-carved cave shape, so a blind
-     * center-ish pick regularly landed the boss inside solid stone.
+     * The boss's spawn point, dead center of the boss room's drum
+     * (room.centerX()/centerZ()), standing on the drum's guaranteed-
+     * open, guaranteed-flat interior floor. Unlike an ordinary NORMAL
+     * room (an irregular noise-carved blob, where a blind center-ish
+     * pick regularly landed inside solid stone - hence the old random-
+     * search-for-an-open-column approach), a BOSS room is always the
+     * deterministic cylinder from DungeonBossRoomGeometry: its floor is
+     * flat and fully open across the whole interior radius at exactly
+     * floorBottomY + SOLID_FLOOR_LAYERS (see
+     * DungeonRoomPlanner.carveBossRoomColumn), so the center point is
+     * always standable - no search needed. Falls back to the old
+     * random-open-column search only as a safety net for the rare race
+     * where a player reaches the room in the same tick or two it was
+     * carved (see MAX_SPAWN_RETRIES's doc).
      */
     private Location randomPointInRoom(World world, DungeonRoom room, int floorBottomY) {
         int groundY = floorBottomY + com.skyblock.dungeon.util.FloorBounds.SOLID_FLOOR_LAYERS;
+        int centerX = room.centerX();
+        int centerZ = room.centerZ();
+        if (world.getBlockAt(centerX, groundY, centerZ).getType().isAir()
+                && world.getBlockAt(centerX, groundY + 1, centerZ).getType().isAir()) {
+            return new Location(world, centerX + 0.5, groundY, centerZ + 0.5);
+        }
+
+        // Safety-net fallback: room isn't fully carved yet (rare race),
+        // search for any open column rather than failing outright.
         int[] spot = DungeonSpawnLocator.findOpenColumn(world, room, groundY, random, MAX_LOCATE_ATTEMPTS);
         if (spot == null) {
             return null;

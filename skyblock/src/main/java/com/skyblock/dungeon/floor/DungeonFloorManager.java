@@ -175,77 +175,40 @@ public final class DungeonFloorManager {
     }
 
     /**
-     * Boss room placement is fully independent of how much terrain has
-     * generated, per design - a fast/lucky group could stumble onto it
-     * early. We pick a random point "a ways away" from the floor's
-     * origin (40-90% of the generation leash) so it's never trivially
-     * at the entrance, then register it as a real room in the graph;
-     * DungeonRoomPlanner carves it like any other room once a frontier
-     * reaches it.
+     * Boss room placement now simply adopts the floor's own preplanned
+     * boss room - DungeonGraphPlanner already places exactly one BOSS
+     * room per floor as part of the graph (on a corridor branch, far
+     * from the entrance, fully connected, carved via SDF). This method
+     * used to independently roll its own random (x, z) and register a
+     * SECOND, unrelated BOSS room via planner.registerBossRoom(x, z,
+     * ...) - since that roll had no knowledge of where the graph's own
+     * boss room actually landed, the two would only coincide by luck.
+     * When they didn't coincide, the graph's real boss room still got
+     * carved (bubbly SDF, fully connected) while this method's random
+     * roll ALSO created a second, disconnected, drum-carved BOSS room
+     * at an arbitrary location - occasionally right next to the
+     * entrance - and only the second (most-recently-registered) one
+     * ever got treated as "the" boss room by getBossRoom()/
+     * DungeonBossRoomTrigger, even though it had none of the graph's
+     * carving/connectivity guarantees. Now there is exactly one boss
+     * room per floor, period: whatever DungeonGraphPlanner planned.
      */
     private void placeBossRoom(int floorNumber, DungeonRoomPlanner planner) {
-        // Idempotency guard: this is the fix for "two boss rooms spawned
-        // on top of each other on floor 1, and no boss was found in the
-        // second one." placeBossRoom() has (at least) two call paths
-        // that can both reach it for the same floor number - unlockFloor()
-        // and setDungeonWorld()'s post-reset re-placement - and previously
-        // neither checked whether a boss room already existed for this
-        // floor before registering a brand new one at a fresh random
-        // location. The second registration silently overwrote the
-        // bossRooms map entry: the first (physically-built, already
-        // carved, possibly already occupied by a spawned boss) room
-        // became permanently unreachable via getBossRoom(), while
-        // DungeonBossRoomTrigger and DungeonRoomPlanner's cylinder-carve
-        // logic both switched to treating the second, newly-registered
-        // room as "the" boss room for that floor - which had never been
-        // carved or urgent-queued at the time a player first reached it,
-        // hence a boss failing to spawn there. Bailing out here if this
-        // floor already has a registered boss room makes every call path
-        // safe to call repeatedly without ever producing a duplicate.
+        // Idempotency guard: still worth keeping, since unlockFloor()
+        // and setDungeonWorld()'s post-reset re-placement can both call
+        // this for the same floor number.
         if (bossRooms.containsKey(floorNumber)) {
             logger.warning("[Dungeon] placeBossRoom(" + floorNumber + ") called but a boss room is already "
                     + "registered for this floor - skipping duplicate placement.");
             return;
         }
 
-        RoomGraph graph = getOrCreateRoomGraph(floorNumber);
-        int radiusX = 8 + random.nextInt(5);
-        int radiusZ = 8 + random.nextInt(5);
-
-        // Reject candidate points that would overlap any room already
-        // known in this floor's graph (including a stray CHEST/NORMAL
-        // room independently rolled by the cave carver before the boss
-        // room claimed its footprint) - re-roll a fresh angle/distance
-        // rather than silently placing two rooms on top of each other.
-        int x = 0;
-        int z = 0;
-        boolean found = false;
-        for (int attempt = 0; attempt < 32; attempt++) {
-            double angle = random.nextDouble() * Math.PI * 2;
-            double distance = FloorBounds.GENERATION_RADIUS * (0.4 + random.nextDouble() * 0.5);
-            int candidateX = (int) Math.round(floor1OriginX + Math.cos(angle) * distance);
-            int candidateZ = (int) Math.round(floor1OriginZ + Math.sin(angle) * distance);
-
-            if (!overlapsExistingRoom(graph, candidateX, candidateZ, radiusX, radiusZ)) {
-                x = candidateX;
-                z = candidateZ;
-                found = true;
-                break;
-            }
+        DungeonRoom bossRoom = planner.plannedBossRoom();
+        if (bossRoom == null) {
+            logger.warning("[Dungeon] Floor " + floorNumber + " has no preplanned boss room in its graph - "
+                    + "this should not happen; DungeonGraphPlanner should always place exactly one.");
+            return;
         }
-        if (!found) {
-            // Extremely unlikely (would require a near-fully-occupied
-            // ring at that radius band) but fall back to the last
-            // candidate rather than never placing a boss room at all.
-            double angle = random.nextDouble() * Math.PI * 2;
-            double distance = FloorBounds.GENERATION_RADIUS * (0.4 + random.nextDouble() * 0.5);
-            x = (int) Math.round(floor1OriginX + Math.cos(angle) * distance);
-            z = (int) Math.round(floor1OriginZ + Math.sin(angle) * distance);
-            logger.warning("[Dungeon] Floor " + floorNumber + " boss room placement could not find a "
-                    + "non-overlapping spot after 32 attempts - placing anyway at (" + x + ", " + z + ").");
-        }
-
-        DungeonRoom bossRoom = planner.registerBossRoom(x, z, radiusX, radiusZ);
         bossRooms.put(floorNumber, bossRoom);
 
         // Queue the boss room's own footprint for carving right now,
@@ -259,26 +222,8 @@ public final class DungeonFloorManager {
         // mid-carve, a few ticks out) well before anyone can walk there.
         planner.enqueueBossRoomAreaUrgent(dungeonWorld, bossRoom);
 
-        logger.info("[Dungeon] Floor " + floorNumber + " boss room placed at (" + x + ", " + z + ").");
-    }
-
-    /**
-     * True if a candidate axis-aligned box (center + radii, with a small
-     * padding margin) overlaps any room already registered in the given
-     * floor's graph. Used exclusively by placeBossRoom() to stop a new
-     * boss room from ever being registered on top of an existing room
-     * (boss, chest, buffer, or otherwise) of the same floor.
-     */
-    private boolean overlapsExistingRoom(RoomGraph graph, int centerX, int centerZ, int radiusX, int radiusZ) {
-        int padding = 16; // extra clearance so rooms don't just barely touch
-        for (DungeonRoom existing : graph.allRooms()) {
-            boolean separatedX = Math.abs(centerX - existing.centerX()) > (radiusX + existing.radiusX() + padding);
-            boolean separatedZ = Math.abs(centerZ - existing.centerZ()) > (radiusZ + existing.radiusZ() + padding);
-            if (!separatedX && !separatedZ) {
-                return true; // boxes (with padding) intersect
-            }
-        }
-        return false;
+        logger.info("[Dungeon] Floor " + floorNumber + " boss room adopted from planned graph at ("
+                + bossRoom.centerX() + ", " + bossRoom.centerZ() + ").");
     }
 
     /** The registered boss room for a floor, or null if that floor hasn't been unlocked/placed yet. */
