@@ -42,6 +42,7 @@ import com.skyblock.util.NameValidator;
 import com.skyblock.vault.VaultSystem;
 
 import com.skyblock.dungeon.combat.ExampleMilestoneBoss;
+import com.skyblock.dungeon.combat.BossArchetypeRegistry;
 import com.skyblock.dungeon.combat.DungeonBossGateController;
 import com.skyblock.dungeon.combat.MobLevelApplicator;
 import com.skyblock.dungeon.combat.MobLevelRoller;
@@ -56,6 +57,7 @@ import com.skyblock.dungeon.floor.DungeonStaircaseOrchestrator;
 import com.skyblock.dungeon.gen.DungeonCarveScheduler;
 import com.skyblock.dungeon.gen.DungeonWorldGenerator;
 import com.skyblock.dungeon.listener.DungeonBlockProtectionListener;
+import com.skyblock.dungeon.listener.DungeonBossAnchorListener;
 import com.skyblock.dungeon.listener.DungeonChestLootListener;
 import com.skyblock.dungeon.listener.DungeonCommandLockdownListener;
 import com.skyblock.dungeon.listener.DungeonDeathHandler;
@@ -64,7 +66,11 @@ import com.skyblock.dungeon.listener.DungeonJoinQuitListener;
 import com.skyblock.dungeon.listener.DungeonMobSuffocationGuard;
 import com.skyblock.dungeon.listener.DungeonPortalHandler;
 import com.skyblock.dungeon.classes.ClassCommand;
+import com.skyblock.dungeon.classes.ClassProgressionService;
 import com.skyblock.dungeon.classes.ClassSkillRegistry;
+import com.skyblock.dungeon.classes.DungeonProgressionMenu;
+import com.skyblock.dungeon.classes.LevelCommand;
+import com.skyblock.dungeon.classes.SkillCommand;
 import com.skyblock.dungeon.classes.PlayerClassStorage;
 import com.skyblock.dungeon.classes.WeaponSkillListener;
 import com.skyblock.dungeon.drops.DungeonDropItemFactory;
@@ -277,13 +283,33 @@ public class SkyblockPlugin extends JavaPlugin {
             DungeonXpListener dungeonXpListener =
                 new DungeonXpListener(dungeonMobLevelApplicator, dungeonProgressionStorage);
 
+            // Guild storage is built here (rather than further down, where
+            // it used to live) because ClassProgressionService needs it -
+            // the very first class pick requires guild membership.
+            GuildStorage guildStorage = new GuildStorage(getDataFolder(), getLogger());
+            GuildInviteManager guildInviteManager = new GuildInviteManager();
+
             ClassSkillRegistry dungeonSkillRegistry = new ClassSkillRegistry();
             PlayerClassStorage dungeonClassStorage = new PlayerClassStorage(getDataFolder(), getLogger());
             WeaponSkillListener dungeonWeaponSkillListener = new WeaponSkillListener(
                 this, dungeonClassStorage, dungeonSkillRegistry, dungeonProgressionStorage
             );
-            ClassCommand dungeonClassCommand =
-                new ClassCommand(dungeonClassStorage, dungeonSkillRegistry, dungeonProgressionStorage);
+
+            // Shared pick/switch rules (one class at a time, level 10 +
+            // guild required for the first pick, reset to level 0 on any
+            // pick) - both the text command and the GUI call into this so
+            // they can never drift out of sync on the actual rules.
+            ClassProgressionService dungeonClassProgressionService =
+                new ClassProgressionService(dungeonClassStorage, dungeonProgressionStorage, guildStorage);
+            DungeonProgressionMenu dungeonProgressionMenu = new DungeonProgressionMenu(
+                dungeonClassStorage, dungeonSkillRegistry, dungeonProgressionStorage, dungeonClassProgressionService
+            );
+            ClassCommand dungeonClassCommand = new ClassCommand(
+                dungeonClassStorage, dungeonSkillRegistry, dungeonProgressionStorage,
+                dungeonClassProgressionService, dungeonProgressionMenu
+            );
+            LevelCommand dungeonLevelCommand = new LevelCommand(dungeonProgressionMenu);
+            SkillCommand dungeonSkillCommand = new SkillCommand(dungeonProgressionMenu);
 
             DungeonItemGenerator dungeonItemGenerator = new DungeonItemGenerator(this, dungeonRandom);
             ItemLevelGateListener dungeonItemLevelGateListener =
@@ -293,13 +319,20 @@ public class SkyblockPlugin extends JavaPlugin {
 
             DungeonLootTable dungeonLootTable =
                 new DungeonLootTable(new DungeonRarityRoller(), dungeonRandom, dungeonItemGenerator);
-            DungeonChestRoomPlacer dungeonChestPlacer = new DungeonChestRoomPlacer(dungeonLootTable, dungeonRandom);
 
             DungeonDropRegistry dungeonDropRegistry = new DungeonDropRegistry();
             DungeonDropItemFactory dungeonDropItemFactory = new DungeonDropItemFactory(this, dungeonDropRegistry);
             DungeonMobDropListener dungeonMobDropListener = new DungeonMobDropListener(
                 dungeonMobLevelApplicator, dungeonDropRegistry, dungeonDropItemFactory,
                 new DungeonRarityRoller(dungeonRandom), dungeonItemGenerator, dungeonFloorBounds, dungeonRandom
+            );
+
+            // Chests roll a mix of real gear (weapons/armor) AND sellable
+            // mob-drop items (fangs, cores, essences...) - previously mob
+            // drops could only ever come from kills, never a chest.
+            DungeonChestRoomPlacer dungeonChestPlacer = new DungeonChestRoomPlacer(
+                dungeonLootTable, dungeonDropRegistry, dungeonDropItemFactory,
+                new DungeonRarityRoller(dungeonRandom), dungeonRandom
             );
 
             // Stops dungeon mobs from dying to suffocation-in-terrain while
@@ -315,16 +348,17 @@ public class SkyblockPlugin extends JavaPlugin {
             dungeonEntityVisibilityCullerLocal.start();
             this.dungeonEntityVisibilityCuller = dungeonEntityVisibilityCullerLocal;
 
-            GuildStorage guildStorage = new GuildStorage(getDataFolder(), getLogger());
-            GuildInviteManager guildInviteManager = new GuildInviteManager();
             GuildCommand guildCommand = new GuildCommand(guildStorage, guildInviteManager, dungeonDropItemFactory);
 
             DungeonBossGateController dungeonBossGateController =
                 new DungeonBossGateController(this, dungeonFloorManager, dungeonThemeRegistry);
+            BossArchetypeRegistry dungeonBossArchetypeRegistry = new BossArchetypeRegistry(dungeonRandom);
             DungeonBossRoomTrigger dungeonBossRoomTrigger = new DungeonBossRoomTrigger(
                 this, dungeonThemeRegistry, dungeonMobLevelRoller, dungeonMobLevelApplicator,
-                dungeonStaircaseOrchestrator, dungeonBossGateController, dungeonRandom
+                dungeonStaircaseOrchestrator, dungeonBossGateController, dungeonBossArchetypeRegistry, dungeonRandom
             );
+            DungeonBossAnchorListener dungeonBossAnchorListener =
+                new DungeonBossAnchorListener(dungeonMobLevelApplicator);
 
             // Restored floors whose boss was already dead before this restart
             // must not let the boss room trigger spawn a brand new boss the
@@ -443,6 +477,8 @@ public class SkyblockPlugin extends JavaPlugin {
 
             getCommand("dungeon").setExecutor(dungeonCommand);
             getCommand("class").setExecutor(dungeonClassCommand);
+            getCommand("level").setExecutor(dungeonLevelCommand);
+            getCommand("skill").setExecutor(dungeonSkillCommand);
             getCommand("guild").setExecutor(guildCommand);
 
             pm.registerEvents(dungeonDeathHandler, this);
@@ -457,6 +493,7 @@ public class SkyblockPlugin extends JavaPlugin {
             pm.registerEvents(dungeonItemCombatStatsListener, this);
             pm.registerEvents(dungeonMobDropListener, this);
             pm.registerEvents(dungeonMobSuffocationGuard, this);
+            pm.registerEvents(dungeonBossAnchorListener, this);
             pm.registerEvents(dungeonFrontierListener, this);
             pm.registerEvents(dungeonChestLootListener, this);
             pm.registerEvents(dungeonBlockProtectionListener, this);

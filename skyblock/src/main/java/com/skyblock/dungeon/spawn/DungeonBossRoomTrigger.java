@@ -1,6 +1,9 @@
 package com.skyblock.dungeon.spawn;
 
+import com.skyblock.dungeon.combat.BossArchetype;
+import com.skyblock.dungeon.combat.BossArchetypeRegistry;
 import com.skyblock.dungeon.combat.DungeonBossGateController;
+import com.skyblock.dungeon.combat.GenericBossBehavior;
 import com.skyblock.dungeon.combat.MilestoneBoss;
 import com.skyblock.dungeon.combat.MobLevelApplicator;
 import com.skyblock.dungeon.combat.MobLevelRoller;
@@ -71,6 +74,7 @@ public final class DungeonBossRoomTrigger {
     private final MobLevelApplicator levelApplicator;
     private final DungeonStaircaseOrchestrator orchestrator;
     private final DungeonBossGateController gateController;
+    private final BossArchetypeRegistry archetypeRegistry;
     private final Random random;
 
     /** Optional per-floor scripted boss factories. Floors without an entry here fall back to buffed vanilla. */
@@ -82,13 +86,15 @@ public final class DungeonBossRoomTrigger {
     public DungeonBossRoomTrigger(JavaPlugin plugin, FloorThemeRegistry themeRegistry,
                                    MobLevelRoller levelRoller, MobLevelApplicator levelApplicator,
                                    DungeonStaircaseOrchestrator orchestrator,
-                                   DungeonBossGateController gateController, Random random) {
+                                   DungeonBossGateController gateController,
+                                   BossArchetypeRegistry archetypeRegistry, Random random) {
         this.plugin = plugin;
         this.themeRegistry = themeRegistry;
         this.levelRoller = levelRoller;
         this.levelApplicator = levelApplicator;
         this.orchestrator = orchestrator;
         this.gateController = gateController;
+        this.archetypeRegistry = archetypeRegistry;
         this.random = random;
     }
 
@@ -171,6 +177,12 @@ public final class DungeonBossRoomTrigger {
         }
 
         EntityType type = pickBossEntityType(theme);
+        // Build the pedestal (4-block-radius, 1-block-thick smooth stone
+        // disc) directly under the spot the boss will stand, before the
+        // entity spawns, so it's never seen popping in after the fact.
+        DungeonBossPedestal.build(world, (int) Math.floor(spawnLoc.getX()), spawnLoc.getBlockY(),
+                (int) Math.floor(spawnLoc.getZ()));
+
         if (!(world.spawnEntity(spawnLoc, type) instanceof LivingEntity entity)) {
             return;
         }
@@ -188,11 +200,26 @@ public final class DungeonBossRoomTrigger {
         levelApplicator.tagBoss(entity);
         hookCustomAi(entity);
 
+        // Every floor boss - not just milestone floors - gets a proper
+        // named identity ("The Undead Lord", "The Bone Marshal", etc.)
+        // instead of reading as a leveled-up copy of an ordinary mob with
+        // the same generic tier-colored name. Milestone floors with a
+        // scripted factory keep that name too; the factory only replaces
+        // the ability/phase logic below, not the identity.
+        BossArchetype archetype = archetypeRegistry.get(type);
+        levelApplicator.nameEntityAsBoss(entity, archetype.getBossName(), level);
+
+        // Anchor the boss to its pedestal: AI disabled so it stands still
+        // exactly where it spawned until something damages it, at which
+        // point DungeonBossAnchorListener re-enables AI and it's free to
+        // chase/reposition for the rest of the fight.
+        entity.setAI(false);
+
         MilestoneBossFactory factory = theme.isMilestoneFloor() ? milestoneFactories.get(floorNumber) : null;
-        if (factory != null) {
-            MilestoneBoss boss = factory.create(plugin, entity, floorNumber);
-            plugin.getServer().getScheduler().runTaskTimer(plugin, boss::update, 0L, MILESTONE_BOSS_TICK_PERIOD);
-        }
+        MilestoneBoss boss = (factory != null)
+                ? factory.create(plugin, entity, floorNumber)
+                : new GenericBossBehavior(plugin, entity, floorNumber, archetype);
+        plugin.getServer().getScheduler().runTaskTimer(plugin, boss::update, 0L, MILESTONE_BOSS_TICK_PERIOD);
     }
 
     /** Bats and iron golems don't naturally attack players - bolt on custom AI for them, same as ambient spawns. */
@@ -225,6 +252,6 @@ public final class DungeonBossRoomTrigger {
         if (spot == null) {
             return null;
         }
-        return new Location(world, spot[0] + 0.5, groundY, spot[1] + 0.5);
+        return new Location(world, spot[0] + 0.5, spot[1], spot[2] + 0.5);
     }
 }

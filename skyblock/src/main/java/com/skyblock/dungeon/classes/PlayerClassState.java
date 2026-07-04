@@ -11,10 +11,11 @@ import java.util.UUID;
  * persistence is PlayerClassStorage, same split as every other
  * dungeon state/storage pair in this codebase.
  *
- * Class choice is one-way by design (no /class change once picked) -
- * matches the "pick a build and commit" feel the skill trees are
- * meant to have. Add a respec token/command later if that turns out
- * to be too harsh.
+ * Class choice/switching rules (how many classes at once, level/guild
+ * gates, the level-0 reset on switch) all live in
+ * ClassProgressionService, not here - this class stays a plain data
+ * holder so the GUI and the text command can share one rule
+ * implementation instead of drifting out of sync.
  */
 public final class PlayerClassState {
 
@@ -30,13 +31,17 @@ public final class PlayerClassState {
         return classType != null;
     }
 
-    /** Returns false if a class was already chosen - no-op, doesn't overwrite. */
-    public boolean chooseClass(PlayerClassType type) {
-        if (classType != null) {
-            return false;
-        }
-        classType = type;
-        return true;
+    /**
+     * Sets (or switches) this player's class unconditionally and wipes
+     * every previously learned skill rank - a fresh class always starts
+     * with a clean skill tree. Gating (level/guild requirements, "can
+     * this player do this right now") is ClassProgressionService's job,
+     * not this class's - by the time this is called, that's already
+     * been checked.
+     */
+    public void setClass(PlayerClassType type) {
+        this.classType = type;
+        this.skillRanks.clear();
     }
 
     public int getRank(String skillId) {

@@ -15,14 +15,21 @@
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/crates/CrateSystem.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dev/TestForms.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/classes/ClassCommand.java
+/workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/classes/ClassProgressionService.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/classes/ClassSkill.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/classes/ClassSkillRegistry.java
+/workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/classes/DungeonProgressionMenu.java
+/workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/classes/LevelCommand.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/classes/PlayerClassState.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/classes/PlayerClassStorage.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/classes/PlayerClassType.java
+/workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/classes/SkillCommand.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/classes/WeaponSkillListener.java
+/workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/combat/BossArchetype.java
+/workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/combat/BossArchetypeRegistry.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/combat/DungeonBossGateController.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/combat/ExampleMilestoneBoss.java
+/workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/combat/GenericBossBehavior.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/combat/MilestoneBoss.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/combat/MobBuffApplicator.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/combat/MobLevelApplicator.java
@@ -63,6 +70,7 @@
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/items/ItemCombatStatsListener.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/items/ItemLevelGateListener.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/listener/DungeonBlockProtectionListener.java
+/workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/listener/DungeonBossAnchorListener.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/listener/DungeonChestLootListener.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/listener/DungeonCommandLockdownListener.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/listener/DungeonDeathHandler.java
@@ -77,6 +85,7 @@
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/progression/DungeonXpListener.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/progression/PlayerProgressionState.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/progression/PlayerProgressionStorage.java
+/workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/spawn/DungeonBossPedestal.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/spawn/DungeonBossRoomTrigger.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/spawn/DungeonChestRoomPlacer.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/spawn/DungeonEntityVisibilityCuller.java

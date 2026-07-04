@@ -82,6 +82,23 @@ public final class PlayerProgressionState {
         return true;
     }
 
+    /**
+     * Wipes level/XP/unspent skill points back to zero. Used when a
+     * player picks or switches their dungeon class, per design ("you
+     * start at lvl 0 again" / "you lose all your levels when you
+     * switch classes"). Deliberately goes below CharacterLevelCurve.
+     * MIN_LEVEL (1) - that constant is the classless-leveling floor a
+     * brand new player starts at, not a hard engine minimum, and the
+     * XP curve math (xpToNextLevel, addXp) works fine starting from 0.
+     * totalSkillPointsEarned is intentionally left untouched - it's a
+     * lifetime stat, not a spendable balance.
+     */
+    public void resetToZero() {
+        this.characterLevel = 0;
+        this.currentXp = 0L;
+        this.unspentSkillPoints = 0;
+    }
+
     public UUID getPlayerId() { return playerId; }
     public int getCharacterLevel() { return characterLevel; }
     public long getCurrentXp() { return currentXp; }

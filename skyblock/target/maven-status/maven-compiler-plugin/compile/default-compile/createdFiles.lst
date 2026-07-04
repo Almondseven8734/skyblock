@@ -8,9 +8,11 @@ com/skyblock/dungeon/floor/DungeonStaircaseOrchestrator.class
 com/skyblock/shop/ShopSystem$ShopItem.class
 com/skyblock/admin/AdminSystem$3.class
 com/skyblock/mine/MineSystem$1.class
+com/skyblock/dungeon/combat/BossArchetypeRegistry.class
 com/skyblock/crates/CrateSystem$CrateConfig.class
 com/skyblock/shop/ShopSystem$MenuType.class
 com/skyblock/ah/AhStorage$2.class
+com/skyblock/dungeon/classes/SkillCommand.class
 com/skyblock/dungeon/drops/DungeonDropRegistry$Adjective.class
 com/skyblock/commands/FlyCommand.class
 com/skyblock/dungeon/floor/DungeonFloorStateStorage.class
@@ -31,10 +33,12 @@ com/skyblock/protection/SpawnProtection.class
 com/skyblock/dungeon/spawn/DungeonBossRoomTrigger.class
 com/skyblock/dungeon/floor/StaircasePlacementValidator.class
 com/skyblock/dungeon/items/DungeonArmorSlot.class
+com/skyblock/dungeon/combat/BossArchetype.class
 com/skyblock/commands/ShopCommand.class
 com/skyblock/dungeon/gen/DungeonRoom.class
 com/skyblock/dungeon/progression/DungeonXpListener.class
 com/skyblock/pwarp/PwarpSystem$PwarpEntry.class
+com/skyblock/dungeon/combat/GenericBossBehavior.class
 com/skyblock/dungeon/progression/PlayerProgressionState.class
 com/skyblock/dungeon/listener/DungeonChestLootListener$FloorForY.class
 com/skyblock/commands/TrashCommand.class
@@ -43,6 +47,8 @@ com/skyblock/island/IslandCommands$1.class
 com/skyblock/shop/SellTrashSystem$MenuSession.class
 com/skyblock/dungeon/loot/DungeonLootTable.class
 com/skyblock/dungeon/drops/DungeonDropRegistry.class
+com/skyblock/dungeon/classes/ClassProgressionService.class
+com/skyblock/dungeon/classes/LevelCommand.class
 com/skyblock/dungeon/items/DungeonItemGenerator.class
 com/skyblock/dungeon/config/FloorTheme.class
 com/skyblock/dungeon/gen/DungeonCarveScheduler$Job.class
@@ -52,11 +58,13 @@ com/skyblock/island/IslandCommands$4.class
 com/skyblock/dungeon/floor/DungeonResetScheduler.class
 com/skyblock/dungeon/gen/StoneBufferGenerator.class
 com/skyblock/dungeon/spawn/DungeonRoomMobSpawner.class
+com/skyblock/dungeon/classes/ClassCommand$1.class
 com/skyblock/shop/AdminShopSystem$AdminShopItem.class
 com/skyblock/dungeon/classes/WeaponSkillListener.class
 com/skyblock/dungeon/floor/DungeonPlayerState.class
 com/skyblock/island/IslandCommands$Pending.class
 com/skyblock/shop/AdminShopSystem$Session.class
+com/skyblock/dungeon/listener/DungeonBossAnchorListener.class
 com/skyblock/dungeon/floor/DungeonFloorStateStorage$BossRoomRecord.class
 com/skyblock/island/IslandPortal$1.class
 com/skyblock/dungeon/drops/DungeonMobDropListener.class
@@ -69,6 +77,7 @@ com/skyblock/dungeon/listener/DungeonChestLootListener.class
 com/skyblock/dungeon/classes/PlayerClassType.class
 com/skyblock/dungeon/loot/DungeonRarity.class
 com/skyblock/mine/MineSystem.class
+com/skyblock/dungeon/classes/DungeonProgressionMenu$1.class
 com/skyblock/dungeon/items/DungeonItemAffixes.class
 com/skyblock/dungeon/gen/DungeonBossRoomGeometry$Gate.class
 com/skyblock/crates/CrateSystem.class
@@ -101,6 +110,7 @@ com/skyblock/dungeon/spawn/DungeonChestRoomPlacer.class
 com/skyblock/dungeon/floor/DungeonFloorManager.class
 com/skyblock/dungeon/items/DungeonWeaponArchetype.class
 com/skyblock/dungeon/classes/PlayerClassState.class
+com/skyblock/dungeon/classes/DungeonProgressionMenu.class
 com/skyblock/dungeon/gen/DungeonRoomPlanner$CaveNoise.class
 com/skyblock/dungeon/gen/DungeonBossRoomGeometry.class
 com/skyblock/dungeon/combat/ExampleMilestoneBoss$MilestoneBossTickRate.class
@@ -146,6 +156,7 @@ com/skyblock/admin/AdminSystem$InputMode.class
 com/skyblock/island/IslandStorage.class
 com/skyblock/island/IslandStorage$1.class
 com/skyblock/dungeon/gen/DungeonRoomPlanner$RoomCarveListener.class
+com/skyblock/dungeon/classes/ClassProgressionService$PickResult.class
 com/skyblock/dungeon/combat/DungeonBossGateController.class
 com/skyblock/island/IslandData$Warp.class
 com/skyblock/shop/SellTrashSystem$SellEntry.class
@@ -187,6 +198,7 @@ com/skyblock/shop/ShopSystem.class
 com/skyblock/dungeon/progression/CharacterLevelCurve.class
 com/skyblock/dungeon/command/DungeonCommand.class
 com/skyblock/vault/VaultStorage.class
+com/skyblock/dungeon/spawn/DungeonBossPedestal.class
 com/skyblock/dungeon/spawn/DungeonEntityVisibilityCuller.class
 com/skyblock/shop/GemshopSystem$ShopEntry.class
 com/skyblock/dungeon/combat/MobLevelApplicator.class

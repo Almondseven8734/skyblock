@@ -10,22 +10,35 @@ import org.bukkit.entity.Player;
 import java.util.List;
 
 /**
- * /class            - shows your class (or the pick menu if you have none)
- * /class choose <swordsman|scout|bowman> - one-time class pick
- * /class skills     - lists this class's skills, your rank, and cost
- * /class learn <skillId> - spends 1 unspent skill point to raise a skill by 1 rank
+ * /class                 - opens the class menu GUI directly (pick
+ *                          screen if classless, info/switch screen if
+ *                          you already have one).
+ * /class choose <type>   - text-command equivalent of picking a class
+ *                          from the GUI; goes through the same
+ *                          ClassProgressionService rules (one class at
+ *                          a time, level 10 + guild required for your
+ *                          first pick, reset to level 0 on any pick).
+ * /class skills          - text listing of your class's skills (the
+ *                          GUI equivalent is /skill or /skills).
+ * /class learn <skillId> - spends 1 unspent skill point to raise a
+ *                          skill by 1 rank.
  */
 public final class ClassCommand implements CommandExecutor {
 
     private final PlayerClassStorage classStorage;
     private final ClassSkillRegistry skillRegistry;
     private final PlayerProgressionStorage progressionStorage;
+    private final ClassProgressionService progressionService;
+    private final DungeonProgressionMenu menu;
 
     public ClassCommand(PlayerClassStorage classStorage, ClassSkillRegistry skillRegistry,
-                         PlayerProgressionStorage progressionStorage) {
+                         PlayerProgressionStorage progressionStorage, ClassProgressionService progressionService,
+                         DungeonProgressionMenu menu) {
         this.classStorage = classStorage;
         this.skillRegistry = skillRegistry;
         this.progressionStorage = progressionStorage;
+        this.progressionService = progressionService;
+        this.menu = menu;
     }
 
     @Override
@@ -36,7 +49,7 @@ public final class ClassCommand implements CommandExecutor {
         }
 
         if (args.length == 0) {
-            showStatus(player);
+            menu.openClassMenu(player);
             return true;
         }
 
@@ -47,18 +60,6 @@ public final class ClassCommand implements CommandExecutor {
             default -> sender.sendMessage("§cUsage: /class [choose <swordsman|scout|bowman>|skills|learn <skillId>]");
         }
         return true;
-    }
-
-    private void showStatus(Player player) {
-        PlayerClassState state = classStorage.get(player.getUniqueId());
-        if (!state.hasClass()) {
-            player.sendMessage("§eYou haven't chosen a class yet. Run §6/class choose <swordsman|scout|bowman>§e.");
-            return;
-        }
-        PlayerProgressionState progression = progressionStorage.get(player.getUniqueId());
-        player.sendMessage("§7You are a " + state.getClassType().getColoredName()
-            + " §7(§f" + progression.getUnspentSkillPoints() + " unspent skill point"
-            + (progression.getUnspentSkillPoints() == 1 ? "" : "s") + "§7). Run §6/class skills §7to see your skills.");
     }
 
     private void handleChoose(Player player, String[] args) {
@@ -74,23 +75,21 @@ public final class ClassCommand implements CommandExecutor {
             return;
         }
 
-        PlayerClassState state = classStorage.get(player.getUniqueId());
-        if (state.hasClass()) {
-            player.sendMessage("§cYou're already a " + state.getClassType().getColoredName()
-                + "§c - class choice is permanent.");
-            return;
+        ClassProgressionService.PickResult result = progressionService.pick(player.getUniqueId(), type);
+        switch (result) {
+            case OK -> player.sendMessage("§aYou are now a " + type.getColoredName()
+                    + "§a! You've been reset to level §f0§a - equip a matching weapon and start grinding.");
+            case ALREADY_THIS_CLASS -> player.sendMessage("§cYou're already a " + type.getColoredName() + "§c.");
+            case LEVEL_TOO_LOW -> player.sendMessage("§cYou need character level §f"
+                    + ClassProgressionService.MIN_LEVEL_FOR_FIRST_CLASS + "+ §cbefore picking your first class.");
+            case NO_GUILD -> player.sendMessage("§cYou need to join or create a guild first - run §6/guild§c.");
         }
-
-        state.chooseClass(type);
-        classStorage.persist(player.getUniqueId(), state);
-        player.sendMessage("§aYou are now a " + type.getColoredName()
-            + "§a! Equip a matching weapon and right-click to use your skills once learned.");
     }
 
     private void showSkills(Player player) {
         PlayerClassState state = classStorage.get(player.getUniqueId());
         if (!state.hasClass()) {
-            player.sendMessage("§eChoose a class first with §6/class choose <swordsman|scout|bowman>§e.");
+            player.sendMessage("§eChoose a class first with §6/class§e or §6/class choose <swordsman|scout|bowman>§e.");
             return;
         }
         PlayerProgressionState progression = progressionStorage.get(player.getUniqueId());
@@ -104,7 +103,7 @@ public final class ClassCommand implements CommandExecutor {
                 skill.getDisplayName(), rank, skill.getMaxRank(), skill.getDescription(),
                 skill.getPointCostPerRank(), skill.getId()));
         }
-        player.sendMessage("§7Run §6/class learn <skillId> §7to spend a point.");
+        player.sendMessage("§7Run §6/class learn <skillId> §7to spend a point, or §6/skill §7for the GUI.");
     }
 
     private void handleLearn(Player player, String[] args) {
@@ -114,7 +113,7 @@ public final class ClassCommand implements CommandExecutor {
         }
         PlayerClassState state = classStorage.get(player.getUniqueId());
         if (!state.hasClass()) {
-            player.sendMessage("§eChoose a class first with §6/class choose <swordsman|scout|bowman>§e.");
+            player.sendMessage("§eChoose a class first with §6/class§e.");
             return;
         }
 

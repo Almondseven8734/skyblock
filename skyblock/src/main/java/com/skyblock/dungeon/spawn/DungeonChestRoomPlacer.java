@@ -1,7 +1,12 @@
 package com.skyblock.dungeon.spawn;
 
+import com.skyblock.dungeon.drops.DungeonDropDefinition;
+import com.skyblock.dungeon.drops.DungeonDropItemFactory;
+import com.skyblock.dungeon.drops.DungeonDropRegistry;
 import com.skyblock.dungeon.gen.DungeonRoom;
 import com.skyblock.dungeon.loot.DungeonLootTable;
+import com.skyblock.dungeon.loot.DungeonRarity;
+import com.skyblock.dungeon.loot.DungeonRarityRoller;
 import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.Block;
@@ -16,6 +21,15 @@ import java.util.Random;
  * moment they're carved, per "chest rooms scattered in generated
  * terrain." Intended to be called from a
  * DungeonRoomPlanner.RoomCarveListener.
+ *
+ * Each chest's contents are an independent roll per item between real
+ * equippable gear (weapons/armor via DungeonLootTable, the same
+ * generator ambient/boss mob kills can drop) and the sellable mob-drop
+ * catalog (DungeonDropRegistry - fangs, cores, essences, etc., the
+ * same items ambient mobs drop on kill). Previously chests only ever
+ * rolled gear, so mob-drop items - despite being a whole 300-entry
+ * catalog with their own sell prices at the guild merchant - could
+ * only ever be obtained by grinding kills, never found in a chest.
  *
  * Looting state itself (room.markLooted()) is NOT set by this class -
  * that has to happen when a player actually empties the chest
@@ -32,12 +46,22 @@ public final class DungeonChestRoomPlacer {
     private static final int MAX_ITEMS = 5;
     /** Random tries at finding a verified-open column before falling back to a full scan. */
     private static final int MAX_LOCATE_ATTEMPTS = 20;
+    /** Fraction of a chest's rolled items that come from the mob-drop catalog rather than equippable gear. */
+    private static final double MOB_DROP_SHARE = 0.4;
 
     private final DungeonLootTable lootTable;
+    private final DungeonDropRegistry dropRegistry;
+    private final DungeonDropItemFactory dropItemFactory;
+    private final DungeonRarityRoller rarityRoller;
     private final Random random;
 
-    public DungeonChestRoomPlacer(DungeonLootTable lootTable, Random random) {
+    public DungeonChestRoomPlacer(DungeonLootTable lootTable, DungeonDropRegistry dropRegistry,
+                                   DungeonDropItemFactory dropItemFactory, DungeonRarityRoller rarityRoller,
+                                   Random random) {
         this.lootTable = lootTable;
+        this.dropRegistry = dropRegistry;
+        this.dropItemFactory = dropItemFactory;
+        this.rarityRoller = rarityRoller;
         this.random = random;
     }
 
@@ -59,14 +83,18 @@ public final class DungeonChestRoomPlacer {
         // guarantee the noise carver actually opened that exact column -
         // roughly 60-65% of the time it's still solid stone. Search for a
         // verified-open column instead of blindly placing at the center.
+        // findOpenColumn also probes a few layers above groundY now, since
+        // the floor/ceiling taper can leave the exact groundY layer solid
+        // even in an otherwise-open room - see DungeonSpawnLocator's doc.
         int[] spot = DungeonSpawnLocator.findOpenColumn(world, room, groundY, random, MAX_LOCATE_ATTEMPTS);
         if (spot == null) {
             return; // no verified-open column in this room (yet) - don't embed a chest in stone
         }
 
         int chestX = spot[0];
-        int chestZ = spot[1];
-        Block block = world.getBlockAt(chestX, groundY, chestZ);
+        int chestY = spot[1];
+        int chestZ = spot[2];
+        Block block = world.getBlockAt(chestX, chestY, chestZ);
         block.setType(Material.CHEST);
 
         if (!(block.getState() instanceof Chest chestState)) {
@@ -74,10 +102,23 @@ public final class DungeonChestRoomPlacer {
         }
 
         int itemCount = MIN_ITEMS + random.nextInt(MAX_ITEMS - MIN_ITEMS + 1);
-        List<ItemStack> loot = lootTable.rollLoot(floorNumber, itemCount);
-        for (ItemStack item : loot) {
+        for (int i = 0; i < itemCount; i++) {
+            ItemStack item = (random.nextDouble() < MOB_DROP_SHARE)
+                    ? rollMobDrop(floorNumber)
+                    : lootTable.rollLoot(floorNumber);
             chestState.getInventory().addItem(item);
         }
         chestState.update();
+    }
+
+    /** Rolls one sellable mob-drop item at floor-appropriate rarity, falling back to gear if the rarity pool is somehow empty. */
+    private ItemStack rollMobDrop(int floorNumber) {
+        DungeonRarity rarity = rarityRoller.roll(floorNumber);
+        List<DungeonDropDefinition> pool = dropRegistry.forRarity(rarity);
+        if (pool.isEmpty()) {
+            return lootTable.rollLoot(floorNumber);
+        }
+        DungeonDropDefinition definition = pool.get(random.nextInt(pool.size()));
+        return dropItemFactory.build(definition);
     }
 }

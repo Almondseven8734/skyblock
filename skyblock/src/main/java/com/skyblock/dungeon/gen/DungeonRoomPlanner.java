@@ -57,6 +57,29 @@ public final class DungeonRoomPlanner {
     /** Ceiling Y-layers kept solid (from floorTopY downward). */
     private static final int SOLID_CEIL_LAYERS  = FloorBounds.SOLID_CEIL_LAYERS;
 
+    /**
+     * Guaranteed-connectivity corridor grid, overlaid on top of the organic
+     * noise caves. The switch from the old room/graph/corridor planner to
+     * pure noise carving (see class doc) traded away any guarantee that two
+     * carved chunks are actually walkably connected to each other - noise
+     * caves can (and did) pinch off into disconnected pockets, which is the
+     * root cause of the "less navigable" regression. Every chunk column now
+     * additionally always carves a straight-through corridor at local
+     * x/z in [7,9] (world-space this lines up at x/z ≡ 7,8,9 mod 16 for
+     * EVERY chunk, since chunk origins are always multiples of 16) - so
+     * these corridors form continuous straight streets running the full
+     * length of the floor in both axes, guaranteeing any two carved chunks
+     * are reachable via this grid even if the noise caves between them
+     * happen to be solid. The organic noise caves still carve everywhere
+     * else and still determine the vertical shape/height variation, so the
+     * floor doesn't just become a flat city grid - the grid is a safety net
+     * under the organic layer, not a replacement for it.
+     */
+    private static final int GRID_CORRIDOR_LOCAL_MIN = 7;
+    private static final int GRID_CORRIDOR_LOCAL_MAX = 9;
+    /** How many Y layers tall the guaranteed grid corridor is, starting right above the solid floor. */
+    private static final int GRID_CORRIDOR_HEIGHT = 3;
+
     @FunctionalInterface
     public interface RoomCarveListener {
         void onRoomCarved(World world, int floorNumber, DungeonRoom room);
@@ -326,7 +349,22 @@ public final class DungeonRoomPlanner {
                 // ring of stone right at the edge of the generation leash so
                 // players can never carve/walk straight out into the void.
                 boolean withinSafeCarveRadius = floorBounds.isWithinCarveRadius(originX, originZ, wx, wz);
+
+                // Guaranteed connectivity grid (see class doc): this column
+                // always gets a walkable corridor regardless of noise if it
+                // falls on the chunk-crossing grid lines, so no two carved
+                // chunks can ever end up noise-isolated from each other.
+                boolean onGridCorridor = withinSafeCarveRadius
+                        && (lx >= GRID_CORRIDOR_LOCAL_MIN && lx <= GRID_CORRIDOR_LOCAL_MAX
+                            || lz >= GRID_CORRIDOR_LOCAL_MIN && lz <= GRID_CORRIDOR_LOCAL_MAX);
+                int gridCorridorTopY = caveMinY + GRID_CORRIDOR_HEIGHT - 1;
+
                 for (int y = caveMinY; y <= caveMaxY; y++) {
+                    if (onGridCorridor && y <= gridCorridorTopY) {
+                        world.getBlockAt(wx, y, wz).setType(Material.AIR, false);
+                        anyOpen = true;
+                        continue;
+                    }
                     if (withinSafeCarveRadius) {
                         double n = noise.sample(wx * FREQ_XZ, y * FREQ_Y, wz * FREQ_XZ);
                         // Smooth the cave threshold against the solid floor

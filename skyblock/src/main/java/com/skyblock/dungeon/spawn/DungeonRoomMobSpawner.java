@@ -104,7 +104,7 @@ public final class DungeonRoomMobSpawner {
             }
 
             EntityType type = roomPool.get(random.nextInt(roomPool.size()));
-            Location spawnLoc = new Location(world, spot[0] + 0.5, groundY, spot[1] + 0.5);
+            Location spawnLoc = new Location(world, spot[0] + 0.5, spot[1], spot[2] + 0.5);
 
             if (!(world.spawnEntity(spawnLoc, type) instanceof LivingEntity entity)) {
                 continue;

@@ -100,6 +100,20 @@ public final class MobLevelApplicator {
         return entity.getPersistentDataContainer().has(bossKey, PersistentDataType.BYTE);
     }
 
+    /**
+     * Overrides the generic tier name-tag applyLevel() gave this entity
+     * with a proper boss identity name (e.g. "The Undead Lord [Lv. 42]")
+     * from BossArchetypeRegistry. Called by DungeonBossRoomTrigger right
+     * after applyLevel()/tagBoss(), so the archetype name always wins
+     * over the generic "[Tier] Zombie [Lv. N]" naming every ordinary mob
+     * gets - a floor boss should never read as just a leveled-up copy of
+     * an ambient mob.
+     */
+    public void nameEntityAsBoss(LivingEntity entity, String bossName, int level) {
+        entity.setCustomName(bossName + " §7[Lv. " + level + "]");
+        entity.setCustomNameVisible(true);
+    }
+
     private void tagLevel(LivingEntity entity, int level) {
         entity.getPersistentDataContainer().set(levelKey, PersistentDataType.INTEGER, level);
     }
