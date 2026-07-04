@@ -57,10 +57,13 @@
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/gen/DungeonBossRoomGeometry.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/gen/DungeonCarveScheduler.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/gen/DungeonCorridor.java
+/workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/gen/DungeonGraphPlanner.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/gen/DungeonRoom.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/gen/DungeonRoomPlanner.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/gen/DungeonWorldGenerator.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/gen/RoomGraph.java
+/workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/gen/SdfShapes.java
+/workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/gen/StairBuilder.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/gen/StoneBufferGenerator.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/items/DungeonArmorSlot.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/items/DungeonItemAffixes.java
@@ -77,6 +80,7 @@
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/listener/DungeonFrontierListener.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/listener/DungeonJoinQuitListener.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/listener/DungeonMobSuffocationGuard.java
+/workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/listener/DungeonNaturalSpawnGuard.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/listener/DungeonPortalHandler.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/loot/DungeonLootTable.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/loot/DungeonRarity.java

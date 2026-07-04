@@ -10,75 +10,52 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
 
 /**
- * Chunk-based cave noise carver. Replaces the old room/graph planner
- * with organic, noise-driven cave generation — think Minecraft cave
- * networks carved into the stone buffer layer.
+ * Chunk-based cave carver, now driven by a preplanned room/tunnel graph
+ * (see DungeonGraphPlanner) instead of raw Perlin-threshold noise.
  *
- * When planAndCarveNear() is called (by a player frontier or buffer
- * room), it determines which 16x16 chunk columns are within range and
- * carves any that haven't been carved yet using 3D value noise:
- *   - Noise below CAVE_THRESHOLD → air (carved cave space)
- *   - Otherwise → stone (or the floor's theme block on the floor layer)
- *   - Bottom 2 Y-layers of the floor band → always solid (walkable floor)
- *   - Top 1 Y-layer → always solid (ceiling, never exposed void)
+ * Previously this class both DECIDED where rooms went (implicitly,
+ * wherever noise happened to open air) and CARVED them, one chunk at a
+ * time, with no advance layout - which is why rooms were flat-floored
+ * domes (a plain noise threshold naturally produces a rounded blob
+ * sitting on a flat cutoff plane) and connectivity between chunks was
+ * never guaranteed (two adjacent chunks' noise could easily fail to
+ * line up, leaving disconnected pockets - the "soft border" bug).
  *
- * The result is an interconnected cave network that feels continuous
- * because coherent noise produces consistent values across chunk
- * boundaries — no seam carving needed.
+ * Now DungeonGraphPlanner plans the ENTIRE floor's rooms and tunnels
+ * upfront, once, the first time the floor is touched (getOrCreatePlanner
+ * triggers this - see the constructor). This class's only remaining job
+ * is RENDERING that plan into blocks, lazily, one chunk column at a
+ * time, exactly as before: DungeonCarveScheduler still drains a small
+ * fixed number of chunk jobs per tick, planAndCarveNear still just
+ * enqueues work for whatever's near a frontier, and nothing about the
+ * frontier-driven, infinite-feeling exploration loop changes. The only
+ * difference is WHAT gets carved into a chunk once it's its turn: a
+ * chunk now looks up which of the graph's already-placed rooms/tunnels
+ * (via RoomGraph's spatial index, see RoomGraph.roomsNearChunk/
+ * corridorsNearChunk) intersect it, and evaluates SdfShapes against
+ * those specific candidates - producing bubbly, non-flat-floored rooms
+ * and wide, arch-shaped tunnels sized relative to the rooms they
+ * connect, instead of undirected noise.
  *
- * The RoomGraph is still maintained for boss room / buffer room
- * registration and staircase validation (those systems need to know
- * "is there carvedspace at XZ"), but it no longer drives the visual
- * shape of the dungeon.
+ * Because the graph is planned upfront with an explicit spanning tree
+ * plus a guaranteed-connectivity bridge pass (see DungeonGraphPlanner),
+ * this class no longer needs the old ensureConnectivity()/seam-connector
+ * safety net - there's no such thing as "noise randomly failed to
+ * connect two chunks" anymore, since every room and tunnel's exact
+ * position was decided in advance and IS the connectivity guarantee.
  *
  * API surface is identical to the old planner so DungeonFloorManager
- * and all callers require no changes.
+ * and all other callers require no changes.
  */
 public final class DungeonRoomPlanner {
 
     /** Chunk columns within this many blocks of a frontier get carved. */
     private static final int CARVE_RADIUS = 48;
 
-    /**
-     * Cave threshold: noise values below this are carved to air.
-     * 0.44 gives roughly 35-40% of the volume as open space —
-     * wide enough for comfortable movement, dense enough to feel like
-     * a solid mountain with caves rather than open void.
-     */
-    private static final double CAVE_THRESHOLD = 0.44;
-
-    /** Noise frequency along XZ — lower = larger, wider cave passages. */
-    private static final double FREQ_XZ = 0.048;
-    /** Noise frequency along Y — slightly higher than XZ compresses vertical range. */
-    private static final double FREQ_Y  = 0.075;
-
-    /** Floor Y-layers kept solid as walkable ground (from floorBottomY upward). */
+    /** Floor Y-layers kept solid as walkable ground (from floorBottomY upward), used only as a fallback cap. */
     private static final int SOLID_FLOOR_LAYERS = FloorBounds.SOLID_FLOOR_LAYERS;
-    /** Ceiling Y-layers kept solid (from floorTopY downward). */
+    /** Ceiling Y-layers kept solid (from floorTopY downward), used only as a fallback cap. */
     private static final int SOLID_CEIL_LAYERS  = FloorBounds.SOLID_CEIL_LAYERS;
-
-    /**
-     * Guaranteed-connectivity corridor grid, overlaid on top of the organic
-     * noise caves. The switch from the old room/graph/corridor planner to
-     * pure noise carving (see class doc) traded away any guarantee that two
-     * carved chunks are actually walkably connected to each other - noise
-     * caves can (and did) pinch off into disconnected pockets, which is the
-     * root cause of the "less navigable" regression. Every chunk column now
-     * additionally always carves a straight-through corridor at local
-     * x/z in [7,9] (world-space this lines up at x/z ≡ 7,8,9 mod 16 for
-     * EVERY chunk, since chunk origins are always multiples of 16) - so
-     * these corridors form continuous straight streets running the full
-     * length of the floor in both axes, guaranteeing any two carved chunks
-     * are reachable via this grid even if the noise caves between them
-     * happen to be solid. The organic noise caves still carve everywhere
-     * else and still determine the vertical shape/height variation, so the
-     * floor doesn't just become a flat city grid - the grid is a safety net
-     * under the organic layer, not a replacement for it.
-     */
-    private static final int GRID_CORRIDOR_LOCAL_MIN = 7;
-    private static final int GRID_CORRIDOR_LOCAL_MAX = 9;
-    /** How many Y layers tall the guaranteed grid corridor is, starting right above the solid floor. */
-    private static final int GRID_CORRIDOR_HEIGHT = 3;
 
     @FunctionalInterface
     public interface RoomCarveListener {
@@ -93,7 +70,6 @@ public final class DungeonRoomPlanner {
     private final FloorTheme theme;
     private final Logger logger;
     private final Random random;
-    private final CaveNoise noise;
     private final DungeonCarveScheduler carveScheduler;
 
     /**
@@ -106,9 +82,60 @@ public final class DungeonRoomPlanner {
      */
     private final Set<Long> carvedChunks = ConcurrentHashMap.newKeySet();
 
+    /** Chunk keys that have actually completed carving (as opposed to merely queued). */
+    private final Set<Long> carvedChunkGeometry = ConcurrentHashMap.newKeySet();
+
+    /**
+     * Chunk keys that were restored from a PAST session's persisted
+     * snapshot (as opposed to carved during the current session). Used
+     * exclusively by enqueueBossRoomAreaUrgent() to tell "this boss
+     * room chunk already finished carving before, on a previous run -
+     * don't touch it" apart from "this chunk was carved earlier THIS
+     * session and needs to be overridden with the boss cylinder shape."
+     * See that method's doc for the full story.
+     */
+    private final Set<Long> restoredChunkKeys = ConcurrentHashMap.newKeySet();
+
+    /**
+     * The floor's preplanned room/tunnel graph and its designated boss
+     * room, produced once by DungeonGraphPlanner in the constructor
+     * below (only when the supplied graph arrives empty - see there).
+     */
+    private final DungeonGraphPlanner.PlannedGraph plannedGraph;
+
     public DungeonRoomPlanner(RoomGraph graph, FloorBounds floorBounds, int floorNumber,
                                double originX, double originZ, FloorTheme theme,
                                Logger logger, Random random, DungeonCarveScheduler carveScheduler) {
+        // Fallback only - callers should prefer the explicit-entrance
+        // constructor below with the floor's REAL doorway location.
+        // Floor 1's actual hub gateway sits at
+        // originX + FloorBounds.FLOOR_0_TO_FLOOR_1_OFFSET (EAST, +X;
+        // see DungeonHubBuilder.gatewayPoint()), not west of origin - a
+        // previous version of this fallback pointed west and silently
+        // planned the entire graph anchored on the opposite side of the
+        // disc from where the hub actually opens, leaving the real
+        // doorway with no nearby planned room/corridor at all (nothing
+        // carved there, ever). This fallback is now at least on the
+        // correct side, but DungeonFloorManager.getOrCreatePlanner
+        // always supplies the exact gateway point directly now, so this
+        // path shouldn't be hit in normal operation.
+        this(graph, floorBounds, floorNumber, originX, originZ, theme, logger, random, carveScheduler,
+                originX + FloorBounds.FLOOR_0_TO_FLOOR_1_OFFSET - 24, originZ);
+    }
+
+    /**
+     * Full constructor allowing an explicit entrance position (where the
+     * incoming staircase/gateway from the floor above lands). Every real
+     * caller should use this overload with the floor's actual doorway
+     * location - for Floor 1 that's DungeonHubBuilder.gatewayPoint(),
+     * for higher floors it's the previous floor's placed staircase exit.
+     * The no-entrance-argument constructor above is a last-resort
+     * fallback only, not something normal wiring should rely on.
+     */
+    public DungeonRoomPlanner(RoomGraph graph, FloorBounds floorBounds, int floorNumber,
+                               double originX, double originZ, FloorTheme theme,
+                               Logger logger, Random random, DungeonCarveScheduler carveScheduler,
+                               double entranceX, double entranceZ) {
         this.graph       = graph;
         this.floorBounds = floorBounds;
         this.floorNumber = floorNumber;
@@ -118,8 +145,27 @@ public final class DungeonRoomPlanner {
         this.logger      = logger;
         this.random      = random;
         this.carveScheduler = carveScheduler;
-        // Seed noise from the floor number so each floor feels different.
-        this.noise       = new CaveNoise(floorNumber * 0x9e3779b97f4a7c15L + 0xdeadbeefcafeL);
+
+        // Plan the full floor's room/tunnel graph right now, once, up
+        // front - this is the one piece of work that ISN'T lazy/
+        // frontier-driven, everything downstream of this (actual block
+        // carving) still happens lazily per chunk exactly as before.
+        // Only plan fresh when the graph is genuinely empty, so a graph
+        // already populated elsewhere (e.g. restored from a persistence
+        // snapshot, or a boss room registered against it before this
+        // constructor ran) isn't clobbered or duplicated.
+        if (graph.roomCount() == 0) {
+            this.plannedGraph = DungeonGraphPlanner.planFloor(
+                    floorNumber, originX, originZ, floorBounds, entranceX, entranceZ, logger);
+            for (DungeonRoom room : plannedGraph.graph.allRooms()) {
+                graph.addRoom(room);
+            }
+            for (DungeonCorridor corridor : plannedGraph.graph.allCorridors()) {
+                graph.addCorridor(corridor);
+            }
+        } else {
+            this.plannedGraph = null;
+        }
     }
 
     private RoomCarveListener carveListener;
@@ -146,18 +192,30 @@ public final class DungeonRoomPlanner {
      * any player can call planAndCarveNear() again. This is what stops
      * planAndCarveNear() from re-queuing (and re-carving, overwriting
      * whatever players already built/looted/staircased) chunks that
-     * were already carved before a crash or restart - previously this
-     * set started empty every time the plugin loaded, with nothing
-     * that told it those chunks already existed on disk, which is the
-     * root cause of "the dungeon rebuilds previously built sections."
+     * were already carved before a crash or restart.
      */
     public void restoreCarvedChunks(Collection<Long> keys) {
         carvedChunks.addAll(keys);
+        restoredChunkKeys.addAll(keys);
+        carvedChunkGeometry.addAll(keys);
     }
 
     // ─── Boss / buffer room registration ────────────────────────────────────
 
+    /**
+     * Registers a boss room. With the preplanned graph, a BOSS-type
+     * room already exists (placed by DungeonGraphPlanner) - if one is
+     * found near (x,z) it's returned as-is so callers get the SAME room
+     * object the graph already carves via SDF, rather than a second,
+     * conflicting BOSS room object. Falls back to creating a legacy
+     * plain-footprint BOSS room (carved via the drum-cylinder path, see
+     * carveChunkColumn) only if no matching planned room exists nearby.
+     */
     public DungeonRoom registerBossRoom(int x, int z, int radiusX, int radiusZ) {
+        DungeonRoom existing = graph.nearestBossRoomWithin(x, z, Math.max(radiusX, radiusZ) + 64);
+        if (existing != null) {
+            return existing;
+        }
         DungeonRoom room = new DungeonRoom(UUID.randomUUID(), x, z, radiusX, radiusZ, DungeonRoom.Type.BOSS);
         graph.addRoom(room);
         return room;
@@ -178,24 +236,9 @@ public final class DungeonRoomPlanner {
      * Queues carving for all uncarved/unqueued chunk columns within
      * CARVE_RADIUS of the given XZ frontier. Safe to call repeatedly —
      * already-carved-or-queued chunks are skipped instantly via the
-     * carved-chunk set.
-     *
-     * IMPORTANT: this used to carve every chunk in the radius
-     * synchronously, right here, on whatever thread called it (always
-     * the main thread in practice - PlayerMoveEvent or an entity death
-     * event). A 9x9 chunk radius is 81 chunk columns of noise sampling
-     * and setType() calls done in one go; multiplied by the 3-8
-     * staircases DungeonStaircaseOrchestrator places per floor clear
-     * (each one calling this again for its own buffer room), that was
-     * routinely hundreds of chunk-carves inside a single tick, long
-     * enough to trip Paper's watchdog and crash the server. Now this
-     * method only enqueues chunk jobs; DungeonCarveScheduler drains a
-     * small fixed number of them per tick so no single tick ever does
-     * more than a few chunks' worth of work. The player's own standing
-     * chunk (dcx == dcz == 0) is enqueued urgent so it's essentially
-     * still carved by the next tick; everything else is normal
-     * priority and fills in over the following ticks as the player
-     * approaches.
+     * carved-chunk set. Behaviourally identical to the old version:
+     * only enqueues work, DungeonCarveScheduler drains it a few chunks
+     * per tick, the player's own chunk goes in the urgent lane.
      */
     public void planAndCarveNear(World world, int frontierX, int frontierZ) {
         if (!floorBounds.isWithinGenerationRadius(originX, originZ, frontierX, frontierZ)) {
@@ -211,7 +254,6 @@ public final class DungeonRoomPlanner {
                 int cx = centerChunkX + dcx;
                 int cz = centerChunkZ + dcz;
 
-                // Quick leash check: skip chunk columns whose centre is outside the radius.
                 double chunkCentreX = (cx << 4) + 8.0;
                 double chunkCentreZ = (cz << 4) + 8.0;
                 if (!floorBounds.isWithinGenerationRadius(originX, originZ, chunkCentreX, chunkCentreZ)) {
@@ -228,9 +270,6 @@ public final class DungeonRoomPlanner {
                             carveScheduler.enqueueNormal(this, world, cx, cz);
                         }
                     } else {
-                        // No scheduler wired (e.g. a unit test constructing
-                        // this directly) - fall back to the old synchronous
-                        // behaviour rather than silently doing nothing.
                         carveChunkColumn(world, cx, cz);
                     }
                 }
@@ -243,13 +282,16 @@ public final class DungeonRoomPlanner {
      * registered boss room's footprint overlaps, regardless of player
      * position. Called once, right after registerBossRoom, so a boss
      * room is guaranteed to be fully carved well before any player
-     * could possibly reach it on foot - previously a boss room only
-     * ever got carved incidentally, whenever some player's frontier
-     * radius happened to sweep over it, which meant a player who
-     * walked straight to a boss room the moment it came into range
-     * could arrive before it had been carved: DungeonBossRoomTrigger
-     * would find no open column to spawn into and silently skip the
-     * boss entirely, which is the "boss isn't spawning" symptom.
+     * could possibly reach it on foot.
+     *
+     * A chunk is force-carved (even if carvedChunks already contains
+     * its key) UNLESS that key came from a restored persistence
+     * snapshot (restoredChunkKeys) - see restoreCarvedChunks(). That
+     * distinction stops every server restart from re-triggering
+     * onRoomCarved (ambient mobs/chests) in an already-cleared boss
+     * room, while still letting a boss room registered mid-session
+     * override whatever plain carving may have already touched its
+     * chunks.
      */
     public void enqueueBossRoomAreaUrgent(World world, DungeonRoom bossRoom) {
         int radius = DungeonBossRoomGeometry.RADIUS + 16;
@@ -266,12 +308,16 @@ public final class DungeonRoomPlanner {
                     continue;
                 }
                 long key = ((long) cx << 32) | (cz & 0xFFFFFFFFL);
-                if (carvedChunks.add(key)) {
-                    if (carveScheduler != null) {
-                        carveScheduler.enqueueUrgent(this, world, cx, cz);
-                    } else {
-                        carveChunkColumn(world, cx, cz);
-                    }
+
+                if (restoredChunkKeys.contains(key)) {
+                    continue;
+                }
+
+                carvedChunks.add(key);
+                if (carveScheduler != null) {
+                    carveScheduler.enqueueUrgent(this, world, cx, cz);
+                } else {
+                    carveChunkColumn(world, cx, cz);
                 }
             }
         }
@@ -284,30 +330,42 @@ public final class DungeonRoomPlanner {
         carveChunkColumn(world, chunkX, chunkZ);
     }
 
+    /**
+     * Carves one 16x16 chunk column by evaluating SdfShapes against
+     * whichever planned rooms/tunnels (from the spatial index built by
+     * DungeonGraphPlanner into RoomGraph) actually reach into this
+     * chunk - replacing the old flat Perlin-threshold sampling.
+     *
+     * Per column: solid by default; open to air wherever ANY nearby
+     * room's irregularRoomSDF is <= 0, OR any nearby corridor's
+     * tunnelArchSDF says the column falls inside the arch. A thin solid
+     * floor cap and ceiling cap are still enforced at the very top/
+     * bottom of the floor's playable Y band (not per-room) purely as a
+     * safety net against a room/tunnel SDF poking through into the
+     * buffer stone above/below the floor slot.
+     */
     private void carveChunkColumn(World world, int chunkX, int chunkZ) {
-        int floorY = floorBounds.floorBottomY(floorNumber);
-        int topY   = floorBounds.floorTopY(floorNumber);
-
-        // The playable band is floorY..topY-1 inclusive.
-        // Solid floor layers: floorY .. floorY + SOLID_FLOOR_LAYERS - 1
-        // Solid ceiling layers: topY - SOLID_CEIL_LAYERS .. topY - 1
-        int caveMinY = floorY + SOLID_FLOOR_LAYERS;
-        int caveMaxY = topY   - SOLID_CEIL_LAYERS - 1; // inclusive
+        int floorBottomY = floorBounds.floorBottomY(floorNumber);
+        int floorTopY    = floorBounds.floorTopY(floorNumber);
+        int bandMinY = floorBottomY + 1;             // one safety layer above the absolute floor
+        int bandMaxY = floorTopY - 2;                 // one safety layer below the absolute ceiling
 
         List<Material> primary = theme.getPrimaryBlocks();
         List<Material> accent  = theme.getAccentBlocks();
 
-        // Does a registered boss room's circular footprint reach into this
-        // chunk at all? Checked once per chunk (cheap) rather than once per
-        // column - a boss room's 30-block radius can only ever touch a
-        // handful of chunks, so most calls here return null instantly.
+        List<DungeonRoom> nearbyRooms = graph.roomsNearChunk(chunkX, chunkZ);
+        List<DungeonCorridor> nearbyCorridors = graph.corridorsNearChunk(chunkX, chunkZ);
+
+        // Boss room takes priority and uses the explicit drum/gate shape
+        // (DungeonBossRoomGeometry) rather than the bubbly SDF, so
+        // DungeonBossGateController's gate-sealing logic keeps working
+        // unchanged - it operates on the exact wall-ring/gate math in
+        // that class, not on an SDF surface.
         double chunkCenterX = (chunkX << 4) + 8.0;
         double chunkCenterZ = (chunkZ << 4) + 8.0;
         DungeonRoom bossRoom = graph.nearestBossRoomWithin(
                 chunkCenterX, chunkCenterZ, DungeonBossRoomGeometry.RADIUS + 16);
 
-        // Track whether anything was actually opened up so we only fire the
-        // listener (and add a graph node) when there's real walkable space.
         boolean anyOpen = false;
 
         for (int lx = 0; lx < 16; lx++) {
@@ -315,157 +373,108 @@ public final class DungeonRoomPlanner {
                 int wx = (chunkX << 4) + lx;
                 int wz = (chunkZ << 4) + lz;
 
-                // Floor layers — always solid, themed. Shared by both boss
-                // rooms and ordinary cave columns; only the cave band above
-                // it differs.
-                for (int y = floorY; y < floorY + SOLID_FLOOR_LAYERS; y++) {
-                    Material m = (random.nextDouble() < 0.07) ? pick(accent) : pick(primary);
-                    // applyPhysics=false: bulk carving must never trigger
-                    // neighbor block-update cascades. Those cascades call
-                    // getBlockState() on adjacent chunks, and if a
-                    // neighbor chunk isn't loaded yet that forces a
-                    // synchronous chunk load on the main thread - exactly
-                    // the mechanism behind the "chunk wait" watchdog hangs.
-                    world.getBlockAt(wx, y, wz).setType(m, false);
-                }
-
                 boolean inBossFootprint = bossRoom != null && DungeonBossRoomGeometry.isInsideFootprint(
                         wx - bossRoom.centerX(), wz - bossRoom.centerZ());
 
                 if (inBossFootprint) {
-                    // Explicit cylinder shape (drum wall + 4 open doorways)
-                    // instead of noise - this is what makes a boss room
-                    // read as a deliberately built arena rather than just
-                    // another noise cave pocket. Gate doorways are carved
-                    // open here; DungeonBossGateController seals them at
-                    // runtime once the fight starts.
-                    carveBossRoomColumn(world, bossRoom, wx, wz, floorY, primary, accent);
+                    carveBossRoomColumn(world, bossRoom, wx, wz, floorBottomY, primary, accent);
                     anyOpen = true;
                     continue;
                 }
 
-                // Cave band — noise-driven, but never carved outside the
-                // safe-carve radius: that leaves a solid WALL_BAND_THICKNESS
-                // ring of stone right at the edge of the generation leash so
-                // players can never carve/walk straight out into the void.
                 boolean withinSafeCarveRadius = floorBounds.isWithinCarveRadius(originX, originZ, wx, wz);
 
-                // Guaranteed connectivity grid (see class doc): this column
-                // always gets a walkable corridor regardless of noise if it
-                // falls on the chunk-crossing grid lines, so no two carved
-                // chunks can ever end up noise-isolated from each other.
-                boolean onGridCorridor = withinSafeCarveRadius
-                        && (lx >= GRID_CORRIDOR_LOCAL_MIN && lx <= GRID_CORRIDOR_LOCAL_MAX
-                            || lz >= GRID_CORRIDOR_LOCAL_MIN && lz <= GRID_CORRIDOR_LOCAL_MAX);
-                int gridCorridorTopY = caveMinY + GRID_CORRIDOR_HEIGHT - 1;
+                for (int y = bandMinY; y <= bandMaxY; y++) {
+                    boolean open = false;
 
-                for (int y = caveMinY; y <= caveMaxY; y++) {
-                    if (onGridCorridor && y <= gridCorridorTopY) {
-                        world.getBlockAt(wx, y, wz).setType(Material.AIR, false);
-                        anyOpen = true;
-                        continue;
-                    }
                     if (withinSafeCarveRadius) {
-                        double n = noise.sample(wx * FREQ_XZ, y * FREQ_Y, wz * FREQ_XZ);
-                        // Smooth the cave threshold against the solid floor
-                        // and ceiling bands instead of applying a flat cutoff
-                        // across the whole caveMinY..caveMaxY range. A flat
-                        // cutoff let noise open air flush against the solid
-                        // floor/ceiling slabs, producing a hard, unnaturally
-                        // flat plane exactly where the cave met the floor or
-                        // ceiling - "abruptly stopping" rather than tapering
-                        // like a real cave narrowing into rock. Raising the
-                        // effective threshold (making it progressively
-                        // HARDER to carve air, i.e. more likely to stay
-                        // solid) as a column approaches either edge of the
-                        // cave band creates a gradual taper: open caverns in
-                        // the middle of the vertical band, narrowing into
-                        // solid rock as they approach the floor/ceiling,
-                        // instead of a sharp cliff.
-                        double effectiveThreshold = CAVE_THRESHOLD * floorCeilingTaper(y, caveMinY, caveMaxY);
-                        if (n < effectiveThreshold) {
-                            world.getBlockAt(wx, y, wz).setType(Material.AIR, false);
-                            anyOpen = true;
-                        } else {
-                            // Re-theme the solid block here too (rather than
-                            // leaving whatever StoneBufferGenerator placed,
-                            // typically plain STONE) so the tapered
-                            // transition zone right at the floor/ceiling
-                            // reads as the same themed rock as the walls
-                            // elsewhere, not a visible seam of plain stone.
-                            Material m = (random.nextDouble() < 0.07) ? pick(accent) : pick(primary);
-                            world.getBlockAt(wx, y, wz).setType(m, false);
+                        for (DungeonRoom room : nearbyRooms) {
+                            if (room.type() == DungeonRoom.Type.BOSS) continue; // handled above
+                            double sdf = SdfShapes.irregularRoomSDF(wx, y, wz,
+                                    room.centerX(), room.floorY(), room.centerZ(),
+                                    room.radiusX(), room.domeH(), room.radiusZ(), room.noiseSeed());
+                            if (sdf <= 0) {
+                                open = true;
+                                break;
+                            }
+                        }
+                        if (!open) {
+                            for (DungeonCorridor corridor : nearbyCorridors) {
+                                List<int[]> wp = corridor.waypoints();
+                                boolean insideAnySegment = false;
+                                DungeonRoom fromRoom = graph.getRoom(corridor.fromRoomId());
+                                DungeonRoom toRoom = graph.getRoom(corridor.toRoomId());
+                                double ay = fromRoom != null ? fromRoom.floorY() : y;
+                                double by = toRoom != null ? toRoom.floorY() : y;
+                                for (int i = 0; i < wp.size() - 1 && !insideAnySegment; i++) {
+                                    int[] a = wp.get(i);
+                                    int[] b = wp.get(i + 1);
+                                    insideAnySegment = SdfShapes.tunnelArchSDF(wx, y, wz,
+                                            a[0], ay, a[1], b[0], by, b[1], corridor.width());
+                                }
+                                if (insideAnySegment) {
+                                    open = true;
+                                    break;
+                                }
+                            }
                         }
                     }
-                    // else: inside the wall band - always leave solid, regardless of noise.
+
+                    // Absolute-edge safety caps: never open air at the
+                    // very bottom/top layer of the floor's playable band,
+                    // regardless of what any SDF says.
+                    if (y <= floorBottomY || y >= floorTopY - 1) {
+                        open = false;
+                    }
+
+                    if (open) {
+                        world.getBlockAt(wx, y, wz).setType(Material.AIR, false);
+                        anyOpen = true;
+                    } else {
+                        Material m = (random.nextDouble() < 0.07) ? pick(accent) : pick(primary);
+                        world.getBlockAt(wx, y, wz).setType(m, false);
+                    }
                 }
 
-                // Ceiling layer — always solid, themed (matches the floor
-                // treatment above so walls/floor/ceiling share one palette
-                // instead of the ceiling staying plain unthemed stone).
-                for (int y = topY - SOLID_CEIL_LAYERS; y < topY; y++) {
-                    Material m = (random.nextDouble() < 0.07) ? pick(accent) : pick(primary);
-                    world.getBlockAt(wx, y, wz).setType(m, false);
-                }
+                // Absolute floor/ceiling caps themselves, always solid.
+                Material floorMat = (random.nextDouble() < 0.07) ? pick(accent) : pick(primary);
+                world.getBlockAt(wx, floorBottomY, wz).setType(floorMat, false);
+                Material ceilMat = (random.nextDouble() < 0.07) ? pick(accent) : pick(primary);
+                world.getBlockAt(wx, floorTopY - 1, wz).setType(ceilMat, false);
             }
         }
 
+        carvedChunkGeometry.add(chunkKey(chunkX, chunkZ));
+
         if (!anyOpen) return;
 
-        // Synthesise a DungeonRoom node for this chunk column so staircase
-        // validators and chest/mob hooks have something to work with.
         int roomCx = (chunkX << 4) + 8;
         int roomCz = (chunkZ << 4) + 8;
 
-        // Check for special registered rooms (boss/buffer) near this chunk
-        // — if one falls here, honour its type; otherwise random chance of
-        // chest room, else normal.
+        // With the preplanned graph, a room almost always already exists
+        // at/near this chunk (graph.roomContaining uses the same spatial
+        // index) - the synthesise-a-room fallback below only matters for
+        // chunks that opened purely because a tunnel passed through them
+        // without a room center landing exactly there.
         DungeonRoom existing = graph.roomContaining(roomCx, roomCz);
         DungeonRoom room;
-        if (existing != null && !existing.isCarved()) {
+        if (existing != null) {
             room = existing;
-        } else if (existing == null) {
-            DungeonRoom.Type type = (random.nextDouble() < 0.12)
-                    ? DungeonRoom.Type.CHEST
-                    : DungeonRoom.Type.NORMAL;
-            room = new DungeonRoom(UUID.randomUUID(), roomCx, roomCz, 8, 8, type);
-            graph.addRoom(room);
         } else {
-            room = existing;
+            room = new DungeonRoom(UUID.randomUUID(), roomCx, roomCz, 8, 8, DungeonRoom.Type.NORMAL);
+            graph.addRoom(room);
         }
 
-        room.markCarved();
-        if (carveListener != null) {
-            carveListener.onRoomCarved(world, floorNumber, room);
+        if (!room.isCarved()) {
+            room.markCarved();
+            if (carveListener != null) {
+                carveListener.onRoomCarved(world, floorNumber, room);
+            }
         }
     }
 
-    /**
-     * Multiplier applied to CAVE_THRESHOLD based on how close a Y layer
-     * is to the edges of the carvable cave band (caveMinY/caveMaxY,
-     * i.e. right above the solid floor / right below the solid
-     * ceiling). Returns 1.0 in the middle of the band (full normal cave
-     * threshold) and smoothly falls to TAPER_MIN_MULTIPLIER at the very
-     * edge, over TAPER_LAYERS worth of Y layers - making it
-     * progressively harder for noise to open air the closer a column
-     * gets to the floor/ceiling, so caves narrow into solid rock
-     * instead of stopping on a flat plane.
-     */
-    private static final int TAPER_LAYERS = 3;
-    private static final double TAPER_MIN_MULTIPLIER = 0.15;
-
-    private double floorCeilingTaper(int y, int caveMinY, int caveMaxY) {
-        int distFromFloor = y - caveMinY;
-        int distFromCeil = caveMaxY - y;
-        int distFromNearestEdge = Math.min(distFromFloor, distFromCeil);
-        if (distFromNearestEdge >= TAPER_LAYERS) {
-            return 1.0;
-        }
-        double t = distFromNearestEdge / (double) TAPER_LAYERS; // 0 at edge, 1 at taper boundary
-        // Smoothstep-style ease so the transition itself feels organic
-        // rather than a linear ramp.
-        double eased = t * t * (3 - 2 * t);
-        return TAPER_MIN_MULTIPLIER + eased * (1.0 - TAPER_MIN_MULTIPLIER);
+    private static long chunkKey(int chunkX, int chunkZ) {
+        return ((long) chunkX << 32) | (chunkZ & 0xFFFFFFFFL);
     }
 
     // ─── Boss room cylinder carving ──────────────────────────────────────────
@@ -490,6 +499,15 @@ public final class DungeonRoomPlanner {
         boolean wallRing = DungeonBossRoomGeometry.isInsideWallRing(dx, dz);
         boolean isGate = wallRing && DungeonBossRoomGeometry.gateAt(dx, dz) != null;
 
+        for (int y = floorY; y < minY; y++) {
+            Material m = (random.nextDouble() < 0.1) ? pick(accent) : pick(primary);
+            world.getBlockAt(wx, y, wz).setType(m, false);
+        }
+        for (int y = maxY + 1; y < floorY + DungeonBossRoomGeometry.HEIGHT; y++) {
+            Material m = (random.nextDouble() < 0.1) ? pick(accent) : pick(primary);
+            world.getBlockAt(wx, y, wz).setType(m, false);
+        }
+
         for (int y = minY; y <= maxY; y++) {
             if (wallRing && !isGate) {
                 Material m = (random.nextDouble() < 0.1) ? pick(accent) : pick(primary);
@@ -505,77 +523,5 @@ public final class DungeonRoomPlanner {
     private Material pick(List<Material> list) {
         if (list.isEmpty()) return Material.STONE;
         return list.get(random.nextInt(list.size()));
-    }
-
-    // ─── 3D Value Noise ──────────────────────────────────────────────────────
-
-    /**
-     * A compact 3D value noise implementation seeded per floor.
-     * Uses a 256-entry permutation table and trilinear interpolation
-     * so adjacent chunk boundaries always match — the key property that
-     * makes caves feel continuous across chunk seams.
-     */
-    private static final class CaveNoise {
-
-        private final int[] perm = new int[512];
-
-        CaveNoise(long seed) {
-            // Build a shuffled 0-255 permutation table, then mirror it.
-            int[] p = new int[256];
-            for (int i = 0; i < 256; i++) p[i] = i;
-            Random rng = new Random(seed);
-            for (int i = 255; i > 0; i--) {
-                int j = rng.nextInt(i + 1);
-                int tmp = p[i]; p[i] = p[j]; p[j] = tmp;
-            }
-            for (int i = 0; i < 512; i++) perm[i] = p[i & 255];
-        }
-
-        /** Returns a smooth value in [0, 1]. */
-        double sample(double x, double y, double z) {
-            int xi = (int) Math.floor(x) & 255;
-            int yi = (int) Math.floor(y) & 255;
-            int zi = (int) Math.floor(z) & 255;
-
-            double xf = x - Math.floor(x);
-            double yf = y - Math.floor(y);
-            double zf = z - Math.floor(z);
-
-            double u = fade(xf);
-            double v = fade(yf);
-            double w = fade(zf);
-
-            // Hash the 8 corners of the unit cube.
-            int aaa = perm[perm[perm[xi]   + yi]   + zi];
-            int baa = perm[perm[perm[xi+1] + yi]   + zi];
-            int aba = perm[perm[perm[xi]   + yi+1] + zi];
-            int bba = perm[perm[perm[xi+1] + yi+1] + zi];
-            int aab = perm[perm[perm[xi]   + yi]   + zi+1];
-            int bab = perm[perm[perm[xi+1] + yi]   + zi+1];
-            int abb = perm[perm[perm[xi]   + yi+1] + zi+1];
-            int bbb = perm[perm[perm[xi+1] + yi+1] + zi+1];
-
-            // Trilinear interpolation of pseudo-gradient dot products.
-            double x1 = lerp(u, grad(aaa, xf,   yf,   zf),   grad(baa, xf-1, yf,   zf));
-            double x2 = lerp(u, grad(aba, xf,   yf-1, zf),   grad(bba, xf-1, yf-1, zf));
-            double y1 = lerp(v, x1, x2);
-
-            double x3 = lerp(u, grad(aab, xf,   yf,   zf-1), grad(bab, xf-1, yf,   zf-1));
-            double x4 = lerp(u, grad(abb, xf,   yf-1, zf-1), grad(bbb, xf-1, yf-1, zf-1));
-            double y2 = lerp(v, x3, x4);
-
-            // Map from [-1,1] to [0,1].
-            return (lerp(w, y1, y2) + 1.0) * 0.5;
-        }
-
-        private static double fade(double t) { return t * t * t * (t * (t * 6 - 15) + 10); }
-        private static double lerp(double t, double a, double b) { return a + t * (b - a); }
-
-        private static double grad(int hash, double x, double y, double z) {
-            int h = hash & 15;
-            double u = h < 8 ? x : y;
-            double v = h < 4 ? y : (h == 12 || h == 14 ? x : z);
-            return ((h & 1) == 0 ? u : -u) + ((h & 2) == 0 ? v : -v);
-        }
     }
 }

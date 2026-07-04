@@ -313,7 +313,42 @@ public final class DungeonFloorManager {
         return planners.computeIfAbsent(floorNumber, f -> {
             RoomGraph graph = getOrCreateRoomGraph(f);
             FloorTheme theme = themeRegistry.getTheme(f);
-            DungeonRoomPlanner planner = new DungeonRoomPlanner(graph, floorBounds, f, floor1OriginX, floor1OriginZ, theme, logger, random, carveScheduler);
+
+            // The graph planner needs the floor's REAL doorway location
+            // so it plants the guaranteed ENTRANCE room (and the
+            // corridors that branch off it) exactly where players
+            // actually walk in - not at some independently-guessed
+            // point. Using the planner's built-in default here was the
+            // bug behind "it's building the dungeon inside floor 0 and
+            // not carving anywhere": that default assumed the entrance
+            // was on the west edge of the disc, but Floor 1's hub
+            // gateway is actually on the EAST side
+            // (originX + FLOOR_0_TO_FLOOR_1_OFFSET, see
+            // DungeonHubBuilder.gatewayPoint()) - so the entire graph
+            // got planned anchored 4000 blocks away from where the real
+            // doorway breaks through, leaving that doorway's chunks with
+            // no nearby planned room/corridor at all and therefore
+            // nothing for carveChunkColumn to ever open.
+            //
+            // TODO: floors above 1 don't yet have a wired staircase-exit
+            // position to pass here (see DungeonRoomPlanner's class doc
+            // on the explicit-entrance constructor) - they still fall
+            // through to DungeonRoomPlanner's own fallback, which is now
+            // at least correctly east-anchored but isn't tied to any
+            // specific floor's real staircase landing spot yet. Wire the
+            // actual per-floor staircase exit through here once that
+            // position is tracked/available (DungeonStaircaseOrchestrator
+            // already knows it at placement time).
+            double[] entrance = (f == 1)
+                    ? com.skyblock.dungeon.floor.DungeonHubBuilder.gatewayPoint((int) floor1OriginX, (int) floor1OriginZ)
+                    : null;
+
+            DungeonRoomPlanner planner = (entrance != null)
+                    ? new DungeonRoomPlanner(graph, floorBounds, f, floor1OriginX, floor1OriginZ, theme,
+                            logger, random, carveScheduler, entrance[0], entrance[1])
+                    : new DungeonRoomPlanner(graph, floorBounds, f, floor1OriginX, floor1OriginZ, theme,
+                            logger, random, carveScheduler);
+
             if (globalCarveListener != null) {
                 planner.setRoomCarveListener(globalCarveListener);
             }

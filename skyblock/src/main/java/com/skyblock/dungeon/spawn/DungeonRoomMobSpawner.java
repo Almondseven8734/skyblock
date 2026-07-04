@@ -39,10 +39,21 @@ public final class DungeonRoomMobSpawner {
     /** Roughly one ambient mob per this many blocks of room footprint area. */
     private static final int BLOCKS_PER_MOB = 18;
     private static final int MIN_MOBS_PER_ROOM = 1;
-    /** Raised 3x alongside SPAWN_RATE_MULTIPLIER so the multiplier below isn't immediately clipped by the cap. */
-    private static final int MAX_MOBS_PER_ROOM = 18;
-    /** "3x more likely to spawn" - applied as a flat multiplier on the density-derived mob count. */
-    private static final int SPAWN_RATE_MULTIPLIER = 3;
+    /**
+     * Reverted alongside SPAWN_RATE_MULTIPLIER below. This cap used to be
+     * raised to 18 to accommodate the old 3x multiplier; with the
+     * multiplier cut back down (spawn rate reduced by 66.67%, i.e. /3)
+     * the cap is restored to its pre-3x value so it isn't just dead
+     * headroom that no longer matters.
+     */
+    private static final int MAX_MOBS_PER_ROOM = 6;
+    /**
+     * Density multiplier applied on top of the footprint-derived mob
+     * count. Was 3 ("3x more likely to spawn"); per report that made
+     * rooms overcrowded, so this restores the original density by
+     * cutting spawn rate by 66.67% (back to 1x / divide-by-3 of the old rate).
+     */
+    private static final int SPAWN_RATE_MULTIPLIER = 1;
     /** Random tries at finding a verified-open column before falling back to a full scan. */
     private static final int MAX_LOCATE_ATTEMPTS = 12;
     /** No ambient mobs at all within this many blocks of a floor's boss room center. */
@@ -70,6 +81,13 @@ public final class DungeonRoomMobSpawner {
     }
 
     public void spawnForRoom(World world, int floorNumber, int floorBottomY, DungeonRoom room) {
+        if (floorNumber < 1) {
+            // Guard against ambient dungeon mobs ever being asked to spawn
+            // on "floor 0" (the entrance hub) or any other non-floor band.
+            // The hub is plain hand-built terrain, not a carved dungeon
+            // room, and was never meant to host ambient spawns at all.
+            return;
+        }
         if (room.type() == DungeonRoom.Type.BOSS || room.type() == DungeonRoom.Type.BUFFER) {
             return;
         }

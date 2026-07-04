@@ -24,6 +24,13 @@ commands:
   class:
     description: Choose your dungeon class and manage skills
     usage: /class [choose <swordsman|scout|bowman>|skills|learn <skillId>]
+  level:
+    description: Open the progression hub (level, XP, skill points, class menu)
+    usage: /level
+  skill:
+    description: Open the skill tree directly
+    usage: /skill
+    aliases: [skills]
   crates:
     description: Teleport to crates
     usage: /crates

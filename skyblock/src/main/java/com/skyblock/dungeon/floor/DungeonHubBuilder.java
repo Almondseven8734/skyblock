@@ -205,4 +205,32 @@ public final class DungeonHubBuilder {
         int hubCenterZ = hubCenterZ(floor1OriginZ);
         return new Location(world, hubCenterX + 1, hubFloorY(floorBounds) + 3, hubCenterZ - HUB_RADIUS_Z + 1);
     }
+
+    /**
+     * The exact XZ of the west-wall gateway breach carved by
+     * buildGateway() - i.e. where the hub actually opens into Floor 1's
+     * cave system. Floor 1's DungeonRoomPlanner/DungeonGraphPlanner MUST
+     * treat this (not some independently-guessed point) as the floor's
+     * entrance location, or the planned graph's guaranteed ENTRANCE room
+     * ends up nowhere near where players actually walk in from - leaving
+     * the real doorway with no nearby planned room/corridor at all, so
+     * carveChunkColumn finds nothing to open and that whole area stays
+     * solid stone forever (read: "it's building the dungeon inside floor
+     * 0 and not carving anywhere").
+     *
+     * Returned as a double[]{x, z} rather than a Location since callers
+     * need this before the graph (and often before any World reference
+     * they want to use here) exists - it's pure floor-plan math, no
+     * Bukkit World needed.
+     */
+    public static double[] gatewayPoint(int floor1OriginX, int floor1OriginZ) {
+        int hubCenterX = hubCenterX(floor1OriginX);
+        int hubCenterZ = hubCenterZ(floor1OriginZ);
+        // Matches buildGateway()'s gatewayX = hubCenterX - HUB_RADIUS_X exactly,
+        // nudged one further block west (-1) so the planned entrance room's
+        // center sits just outside the hub wall, in the cave space the
+        // breach actually opens into, rather than sitting on the wall itself.
+        int gatewayX = hubCenterX - HUB_RADIUS_X - 1;
+        return new double[]{gatewayX, hubCenterZ};
+    }
 }

@@ -171,8 +171,9 @@ public final class DungeonStaircaseOrchestrator implements Listener {
     }
 
     /**
-     * Carves a physical staircase shaft from floor N down through the
-     * border into floor N+1, and registers the buffer room directly
+     * Carves a physical spiral staircase from floor N down through the
+     * border into floor N+1 (using StairBuilder - see that class for the
+     * actual spiral geometry), and registers the buffer room directly
      * beneath it as an active generation frontier on the next floor,
      * per "each staircase has its own buffer room directly at the
      * bottom of the staircase."
@@ -186,58 +187,52 @@ public final class DungeonStaircaseOrchestrator implements Listener {
     private void placeStaircase(int floorNumber, World world, FloorBounds bounds, int x, int z,
                                  StaircasePlacementValidator validator) {
         int floorBottomY = bounds.floorBottomY(floorNumber);
-        int borderY = floorBottomY - 1; // the 1-block border separating this floor from the one below
         int floorBelowTopY = bounds.floorTopY(floorNumber + 1);
         int floorBelowWalkableY = bounds.walkableFloorY(floorNumber + 1);
 
-        // Previously this punched exactly ONE air block through the
-        // border and ran a single-column ladder below it - a 1x1 pinhole
-        // that read in-game as "a hole in the bedrock" rather than
-        // anything resembling a staircase, and was also trivial to miss
-        // entirely while flying/falling past it. This now bores a real
-        // 2x2 vertical shaft (so it's walkable, not just climbable
-        // through a single block) with ladders on all four inner faces
-        // and a properly-sized, fully-opened landing at the bottom - not
-        // just a bare column dropped into unopened stone.
-        int x0 = x, x1 = x + 1;
-        int z0 = z, z1 = z + 1;
+        // Previously this bored a plain 2x2 ladder shaft - functional,
+        // but it read as a mineshaft ladder hole rather than a
+        // staircase. Now uses StairBuilder's 3x3 spiral: a solid centre
+        // support post with stone-brick-style stair treads winding
+        // clockwise around it, themed to match this floor's own primary
+        // block (see StairBuilder.resolveStairMaterial/resolveSupportMaterial).
+        FloorTheme theme = floorManager.getTheme(floorNumber);
+        Material primary = theme.getPrimaryBlocks().isEmpty()
+                ? Material.STONE : theme.getPrimaryBlocks().get(0);
+        Material treadMaterial = com.skyblock.dungeon.gen.StairBuilder.resolveStairMaterial(primary);
+        Material supportMaterial = com.skyblock.dungeon.gen.StairBuilder.resolveSupportMaterial(primary);
 
-        // Bore the 2x2 shaft from just above this floor's solid border
-        // down through the border and all the way to the walkable band
-        // of the floor below, so there's no unopened stone gap at either
-        // end regardless of what the cave carver has or hasn't reached
-        // yet at this XZ.
+        // Span the shaft from just under this floor's solid ground down
+        // through the border and to the top of the floor below's
+        // playable band, so there's no unopened stone gap at either end
+        // regardless of what the room/tunnel carver has or hasn't
+        // reached yet at this XZ - same span as before, just spiralled
+        // instead of laddered.
         int shaftTopY = floorBottomY - 2;   // just under this floor's solid ground
         int shaftBottomY = floorBelowTopY;  // top of the floor below's playable band
 
-        for (int y = shaftTopY; y >= shaftBottomY; y--) {
-            for (int sx = x0; sx <= x1; sx++) {
-                for (int sz = z0; sz <= z1; sz++) {
-                    world.getBlockAt(sx, y, sz).setType(Material.AIR, false);
-                }
+        List<com.skyblock.dungeon.gen.StairBuilder.StairBlock> stairBlocks =
+                com.skyblock.dungeon.gen.StairBuilder.buildSpiralStaircase(
+                        x, z, shaftTopY, shaftBottomY, treadMaterial, supportMaterial);
+
+        for (com.skyblock.dungeon.gen.StairBuilder.StairBlock block : stairBlocks) {
+            org.bukkit.block.Block target = world.getBlockAt(block.x(), block.y(), block.z());
+            target.setType(block.material(), false);
+            if (block.facing() != null && target.getBlockData() instanceof org.bukkit.block.data.type.Stairs stairData) {
+                stairData.setFacing(block.facing());
+                target.setBlockData(stairData, false);
             }
-            // Ladders on the shaft's four inner wall faces so it's
-            // climbable even where it passes through un-carved stone on
-            // the way down, without blocking the walkable air columns.
-            placeLadderFacing(world, x0 - 1, y, (z0 + z1) / 2, org.bukkit.block.BlockFace.EAST);
-            placeLadderFacing(world, x1 + 1, y, (z0 + z1) / 2, org.bukkit.block.BlockFace.WEST);
-            placeLadderFacing(world, (x0 + x1) / 2, y, z0 - 1, org.bukkit.block.BlockFace.SOUTH);
-            placeLadderFacing(world, (x0 + x1) / 2, y, z1 + 1, org.bukkit.block.BlockFace.NORTH);
         }
 
-        // Punch the border itself open across the full 2x2 footprint
-        // (the loop above already covers borderY, but this is kept
-        // explicit since the border is the one layer that must never be
-        // left solid under any circumstance - it's the actual
-        // "abruptly stops in bedrock" failure point being fixed here).
-        for (int sx = x0; sx <= x1; sx++) {
-            for (int sz = z0; sz <= z1; sz++) {
-                world.getBlockAt(sx, borderY, sz).setType(Material.AIR, false);
-            }
-        }
+        // Note: unlike the old ladder-shaft version, no separate border
+        // punch-through step is needed here - buildSpiralStaircase above
+        // already writes every Y level from shaftTopY to shaftBottomY
+        // inclusive (which spans borderY), so the border is already
+        // correctly opened (or left as post/tread, as appropriate) by
+        // the loop above.
 
         // Open a proper landing at the bottom: a small room-sized pocket
-        // on the floor below, not just the bare 2x2 shaft footprint, so
+        // on the floor below, not just the bare shaft footprint, so
         // arriving players have somewhere to actually stand and look
         // around rather than popping out into unopened stone one block
         // outside the shaft.
@@ -254,16 +249,6 @@ public final class DungeonStaircaseOrchestrator implements Listener {
 
         // Register the buffer room on the floor below, directly beneath this staircase.
         floorManager.registerBufferRoomFrontier(floorNumber + 1, x, z);
-    }
-
-    /** Places a ladder at (x, y, z) facing the given direction, only if that block is currently solid (won't overwrite the shaft's own air). */
-    private void placeLadderFacing(World world, int x, int y, int z, org.bukkit.block.BlockFace facing) {
-        org.bukkit.block.Block block = world.getBlockAt(x, y, z);
-        block.setType(Material.LADDER, false);
-        if (block.getBlockData() instanceof org.bukkit.block.data.type.Ladder ladderData) {
-            ladderData.setFacing(facing);
-            block.setBlockData(ladderData, false);
-        }
     }
 
     private void unlockNextFloor(int floorNumber) {

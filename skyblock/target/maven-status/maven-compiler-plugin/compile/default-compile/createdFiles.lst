@@ -20,6 +20,7 @@ com/skyblock/shop/ShopSystem$ShopCategory.class
 com/skyblock/ah/AhStorage$AhItemData.class
 com/skyblock/fishing/FishingSystemV4.class
 com/skyblock/island/IslandStorage$RemoveResult.class
+com/skyblock/dungeon/gen/StairBuilder$1.class
 com/skyblock/dungeon/listener/DungeonFrontierListener.class
 com/skyblock/dungeon/listener/DungeonCommandLockdownListener.class
 com/skyblock/items/SpecialItems.class
@@ -71,6 +72,7 @@ com/skyblock/dungeon/drops/DungeonMobDropListener.class
 com/skyblock/ah/AhStorage$CollectionEntry.class
 com/skyblock/dungeon/drops/DungeonDropDefinition.class
 com/skyblock/ah/AhSystem.class
+com/skyblock/dungeon/gen/StairBuilder$StairBlock.class
 com/skyblock/crates/CrateSystem$SelectedReward.class
 com/skyblock/commands/TeleportCommands.class
 com/skyblock/dungeon/listener/DungeonChestLootListener.class
@@ -111,7 +113,6 @@ com/skyblock/dungeon/floor/DungeonFloorManager.class
 com/skyblock/dungeon/items/DungeonWeaponArchetype.class
 com/skyblock/dungeon/classes/PlayerClassState.class
 com/skyblock/dungeon/classes/DungeonProgressionMenu.class
-com/skyblock/dungeon/gen/DungeonRoomPlanner$CaveNoise.class
 com/skyblock/dungeon/gen/DungeonBossRoomGeometry.class
 com/skyblock/dungeon/combat/ExampleMilestoneBoss$MilestoneBossTickRate.class
 com/skyblock/dungeon/config/FloorThemeRegistry.class
@@ -122,6 +123,7 @@ com/skyblock/kills/KillSystem.class
 com/skyblock/dungeon/listener/DungeonJoinQuitListener.class
 com/skyblock/dungeon/combat/MobLevelRoller.class
 com/skyblock/guild/Guild.class
+com/skyblock/dungeon/listener/DungeonNaturalSpawnGuard.class
 com/skyblock/ah/AhSystem$GuiState.class
 com/skyblock/island/IslandCommands$3.class
 com/skyblock/admin/AdminSystem$MenuType.class
@@ -146,6 +148,7 @@ com/skyblock/island/IslandCommands.class
 com/skyblock/dungeon/gen/DungeonCarveScheduler.class
 com/skyblock/util/NameValidator$Result.class
 com/skyblock/dungeon/gen/RoomGraph.class
+com/skyblock/dungeon/gen/DungeonGraphPlanner$PlannedGraph.class
 com/skyblock/dungeon/util/FloorBounds.class
 com/skyblock/shop/SellTrashSystem$MenuType.class
 com/skyblock/dungeon/classes/PlayerClassStorage.class
@@ -167,6 +170,7 @@ com/skyblock/dungeon/combat/MobBuffApplicator.class
 com/skyblock/shop/AdminShopSystem.class
 com/skyblock/dungeon/combat/ai/BatSwoopAI$State.class
 com/skyblock/island/IslandData$PwarpData.class
+com/skyblock/dungeon/gen/DungeonGraphPlanner.class
 com/skyblock/commands/CrateCommand.class
 com/skyblock/dungeon/loot/DungeonRarityRoller.class
 com/skyblock/dev/TestForms.class
@@ -176,8 +180,10 @@ com/skyblock/dungeon/floor/StaircasePlacementValidator$RoomContainmentCheck.clas
 com/skyblock/dungeon/combat/MobLevelTier.class
 com/skyblock/dungeon/listener/DungeonBlockProtectionListener.class
 com/skyblock/vault/VaultStorage$1.class
+com/skyblock/dungeon/gen/SdfShapes.class
 com/skyblock/tpa/TpaSystem.class
 com/skyblock/admin/AdminSystem$2.class
+com/skyblock/dungeon/gen/StairBuilder.class
 com/skyblock/dungeon/items/ItemLevelGateListener$1.class
 com/skyblock/dungeon/listener/DungeonMobSuffocationGuard.class
 com/skyblock/admin/AdminSystem$AdminPerm.class
