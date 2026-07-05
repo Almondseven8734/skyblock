@@ -137,7 +137,23 @@ public final class DungeonGraphPlanner {
         // gateway" rule enforced in the growth loop below. Wider than an
         // ordinary tunnel so it reads as a distinct, deliberate passage
         // out of the entrance rather than just another branch.
-        double gatewayAngle = Math.atan2(entranceZ - originZ, entranceX - originX);
+        //
+        // Direction matters here: the entrance sits right at the edge of
+        // the floor's disc (it's placed at the hub's gateway point, only
+        // ~1 block inside isWithinCarveRadius's safe boundary - see
+        // FloorBounds.FLOOR_0_TO_FLOOR_1_OFFSET's zero-gap/zero-overlap
+        // math). Pointing this tunnel FROM the origin TOWARD the entrance
+        // (i.e. atan2(entranceZ-originZ, entranceX-originX)) continues in
+        // that same outward direction past the entrance - straight into
+        // FloorBounds.WALL_BAND_THICKNESS's always-solid ring (and/or
+        // Area Zero's own hub structure) beyond the safe carve radius,
+        // where DungeonRoomPlanner refuses to carve. That silently
+        // stranded the entrance behind an ~8-block uncarvable wall with
+        // no guaranteed path into the rest of the floor. Reversing the
+        // direction so it points from the entrance back toward the
+        // origin sends the guaranteed tunnel into the floor's actual
+        // carvable interior instead.
+        double gatewayAngle = Math.atan2(originZ - entranceZ, originX - entranceX);
         if (Double.isNaN(gatewayAngle)) {
             gatewayAngle = 0;
         }

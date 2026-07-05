@@ -93,7 +93,6 @@
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/spawn/DungeonBossPedestal.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/spawn/DungeonBossRoomTrigger.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/spawn/DungeonChestRoomPlacer.java
-/workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/spawn/DungeonEntityVisibilityCuller.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/spawn/DungeonRoomMobSpawner.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/spawn/DungeonSpawnLocator.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/util/DungeonCommandLockdown.java

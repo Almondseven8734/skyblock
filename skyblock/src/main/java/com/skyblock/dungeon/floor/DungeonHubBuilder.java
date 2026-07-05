@@ -83,12 +83,24 @@ public final class DungeonHubBuilder {
     private static final Material LEAF_MATERIAL = Material.OAK_LEAVES;
     private static final Material PORTAL_COLOR_A = Material.BLUE_STAINED_GLASS;
     private static final Material PORTAL_COLOR_B = Material.PURPLE_STAINED_GLASS;
+    private static final Material PATH_MATERIAL_A = Material.COARSE_DIRT;
+    private static final Material PATH_MATERIAL_B = Material.GRAVEL;
 
-    // Scaled to hold the same tree density as the old R25 clearing
-    // (10-16 trees over ~1,963 block^2) now that the clearing area is
-    // ~16x larger (R100 -> ~31,400 block^2): 10-16 * 16 ~= 160-256.
-    private static final int MIN_TREES = 160;
-    private static final int MAX_TREES = 256;
+    /** Path half-width (3 blocks wide total, centered on the route line). */
+    private static final int PATH_HALF_WIDTH = 1;
+    /** How far (blocks) the path steers away from a tree it comes near. */
+    private static final double PATH_TREE_AVOID_RADIUS = 5.0;
+    /** Max lateral (Z) deflection allowed per step of X while steering. */
+    private static final double PATH_MAX_STEP_DEFLECTION = 0.6;
+
+    // Deliberately sparser than a flat density-scale-up from the old R25
+    // clearing would give (that math worked out to 160-256 trees, which
+    // read as overcrowded/cluttered across the full R100 clearing) - these
+    // large multi-branch trees (see buildTree()) read as "big" individually,
+    // so far fewer of them are needed for the clearing to feel forested
+    // rather than packed.
+    private static final int MIN_TREES = 45;
+    private static final int MAX_TREES = 75;
 
     private DungeonHubBuilder() {
     }
@@ -153,7 +165,8 @@ public final class DungeonHubBuilder {
         carveDoorway(world, hubFloorY, hubCenterX, hubCenterZ);           // west: open to the dungeon
         buildPortalFrame(world, hubFloorY, hubCenterX, hubCenterZ);      // east: glass portal
 
-        placeTrees(world, floorBounds, hubFloorY, hubCenterX, hubCenterZ, rng);
+        List<int[]> treePositions = placeTrees(world, floorBounds, hubFloorY, hubCenterX, hubCenterZ, rng);
+        buildPath(world, hubFloorY, hubCenterX, hubCenterZ, treePositions, rng);
     }
 
     /** Ground column inside the clearing: rolls a smooth interpolated height, fills it in, clears air above. */
@@ -388,7 +401,7 @@ public final class DungeonHubBuilder {
      * plus a leaf cluster on the trunk's own top - distinctly NOT a
      * vanilla single-log-trunk-plus-canopy shape.
      */
-    private static void placeTrees(World world, FloorBounds floorBounds, int hubFloorY,
+    private static List<int[]> placeTrees(World world, FloorBounds floorBounds, int hubFloorY,
                                     int hubCenterX, int hubCenterZ, Random rng) {
         int treeCount = MIN_TREES + rng.nextInt(MAX_TREES - MIN_TREES + 1);
         List<int[]> placedAt = new ArrayList<>();
@@ -428,6 +441,7 @@ public final class DungeonHubBuilder {
             int groundY = hubFloorY + terrainLevel(worldX, worldZ);
             buildTree(world, worldX, groundY + 1, worldZ, rng);
         }
+        return placedAt;
     }
 
     /**
@@ -513,6 +527,85 @@ public final class DungeonHubBuilder {
             }
             leafCluster(world, (int) Math.round(x), (int) Math.round(y), (int) Math.round(z), 3);
         }
+    }
+
+    /**
+     * Lays a coarse dirt / gravel path along the ground from the west
+     * doorway (into the dungeon) to the east portal approach, steering
+     * around any obstacle trees rather than cutting straight through
+     * them. Built after placeTrees() so tree positions are known.
+     *
+     * Algorithm: walk the route one X column at a time from the west
+     * threshold to the east threshold, tracking a current Z offset from
+     * hubCenterZ. At each column, any nearby tree base pushes the route
+     * away from it (a simple repulsion), gently pulled back toward
+     * hubCenterZ (dz = 0) when clear of obstacles so the path doesn't
+     * permanently wander once past them. The path itself is
+     * PATH_HALF_WIDTH*2+1 blocks wide, laid as the ground surface
+     * material (alternating coarse dirt / gravel) at the correct
+     * terrain height for each column, and skips individual cells that
+     * would land exactly on a tree's own base column so it never
+     * paves over a trunk even if a tree ends up right at the route's edge.
+     */
+    private static void buildPath(World world, int hubFloorY, int hubCenterX, int hubCenterZ,
+                                   List<int[]> treePositions, Random rng) {
+        int startX = -(AREA_RADIUS - 1); // west doorway threshold (local coords)
+        int endX = AREA_RADIUS - 1;      // east portal approach threshold (local coords)
+
+        double z = 0;
+        Random materialRng = new Random(0x9A7D1E5L ^ ((long) hubCenterX << 16 | (hubCenterZ & 0xFFFF)));
+
+        for (int x = startX; x <= endX; x++) {
+            // Repulsion from nearby trees: only trees within
+            // PATH_TREE_AVOID_RADIUS of the route's current position
+            // (in X) exert any push, so distant trees don't affect it.
+            double push = 0;
+            for (int[] tree : treePositions) {
+                double dx = x - tree[0];
+                double dz = z - tree[1];
+                double dist = Math.hypot(dx, dz);
+                if (dist < PATH_TREE_AVOID_RADIUS && dist > 0.001) {
+                    push += (dz / dist) * (PATH_TREE_AVOID_RADIUS - dist) / PATH_TREE_AVOID_RADIUS;
+                }
+            }
+            // Gentle pull back toward the centerline so the path
+            // straightens out again once it's clear of obstacles,
+            // instead of permanently drifting off to one side.
+            double pullBack = -z * 0.05;
+            double deflection = clamp(push + pullBack, -PATH_MAX_STEP_DEFLECTION, PATH_MAX_STEP_DEFLECTION);
+            z += deflection;
+            // Keep the path within the clearing, well clear of the border ring.
+            z = clamp(z, -(AREA_RADIUS - 6), AREA_RADIUS - 6);
+
+            int centerZ = (int) Math.round(z);
+            for (int dz = -PATH_HALF_WIDTH; dz <= PATH_HALF_WIDTH; dz++) {
+                int localZ = centerZ + dz;
+                if (isTreeBase(treePositions, x, localZ)) {
+                    continue; // never pave directly over a tree's own trunk column
+                }
+                int worldX = hubCenterX + x;
+                int worldZ = hubCenterZ + localZ;
+                if (Math.hypot(x, localZ) > AREA_RADIUS - 2) {
+                    continue; // stay inside the clearing, don't touch the border ring
+                }
+                int groundY = hubFloorY + terrainLevel(worldX, worldZ);
+                Material pathBlock = materialRng.nextInt(3) == 0 ? PATH_MATERIAL_B : PATH_MATERIAL_A;
+                world.getBlockAt(worldX, groundY, worldZ).setType(pathBlock, false);
+            }
+        }
+    }
+
+    private static boolean isTreeBase(List<int[]> treePositions, int x, int z) {
+        for (int[] tree : treePositions) {
+            if (tree[0] == x && tree[1] == z) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static double clamp(double value, double min, double max) {
+        return Math.max(min, Math.min(max, value));
     }
 
     /** Rough small leaf sphere of the given radius around a point, skipping the exact center (already a log). */

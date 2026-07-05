@@ -88,7 +88,6 @@ import com.skyblock.guild.GuildCommand;
 import com.skyblock.guild.GuildInviteManager;
 import com.skyblock.guild.GuildStorage;
 import com.skyblock.dungeon.spawn.DungeonChestRoomPlacer;
-import com.skyblock.dungeon.spawn.DungeonEntityVisibilityCuller;
 import com.skyblock.dungeon.spawn.DungeonRoomMobSpawner;
 import com.skyblock.dungeon.util.FloorBounds;
 import org.bukkit.Location;
@@ -103,7 +102,6 @@ public class SkyblockPlugin extends JavaPlugin {
 
     private DungeonResetScheduler dungeonResetScheduler;
     private DungeonCarveScheduler dungeonCarveScheduler;
-    private DungeonEntityVisibilityCuller dungeonEntityVisibilityCuller;
     private com.skyblock.dungeon.floor.DungeonFloorStateStorage dungeonFloorStateStorage;
     private com.skyblock.dungeon.floor.DungeonFloorManager dungeonFloorManagerRef;
 
@@ -351,14 +349,6 @@ public class SkyblockPlugin extends JavaPlugin {
             // async carving catches up to a spot they've spawned in.
             DungeonMobSuffocationGuard dungeonMobSuffocationGuard =
                 new DungeonMobSuffocationGuard(dungeonMobLevelApplicator);
-
-            // Client-side-only mob hiding beyond 10 blocks / behind terrain,
-            // now that the 3x spawn-rate pass means far more ambient mobs
-            // are alive per floor at once.
-            DungeonEntityVisibilityCuller dungeonEntityVisibilityCullerLocal =
-                new DungeonEntityVisibilityCuller(this, dungeonFloorManager, dungeonMobLevelApplicator);
-            dungeonEntityVisibilityCullerLocal.start();
-            this.dungeonEntityVisibilityCuller = dungeonEntityVisibilityCullerLocal;
 
             GuildCommand guildCommand = new GuildCommand(guildStorage, guildInviteManager, dungeonDropItemFactory);
 
@@ -616,9 +606,6 @@ public class SkyblockPlugin extends JavaPlugin {
         }
         if (dungeonCarveScheduler != null) {
             dungeonCarveScheduler.stop();
-        }
-        if (dungeonEntityVisibilityCuller != null) {
-            dungeonEntityVisibilityCuller.stop();
         }
         getLogger().info("[SkyblockPlugin] Plugin disabled.");
     }

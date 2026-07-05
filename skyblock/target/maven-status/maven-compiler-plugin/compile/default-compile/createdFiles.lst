@@ -208,7 +208,6 @@ com/skyblock/dungeon/progression/CharacterLevelCurve.class
 com/skyblock/dungeon/command/DungeonCommand.class
 com/skyblock/vault/VaultStorage.class
 com/skyblock/dungeon/spawn/DungeonBossPedestal.class
-com/skyblock/dungeon/spawn/DungeonEntityVisibilityCuller.class
 com/skyblock/shop/GemshopSystem$ShopEntry.class
 com/skyblock/dungeon/combat/MobLevelApplicator.class
 com/skyblock/fishing/FishingSystemV4$FishEntry.class
