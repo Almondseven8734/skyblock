@@ -350,6 +350,15 @@ public class SkyblockPlugin extends JavaPlugin {
             DungeonMobSuffocationGuard dungeonMobSuffocationGuard =
                 new DungeonMobSuffocationGuard(dungeonMobLevelApplicator);
 
+            // Blocks vanilla/other-plugin mob spawns anywhere in the
+            // dungeon world (only this plugin's own dungeon spawn
+            // machinery may place a mob there), enforces "nothing but
+            // Area Zero's own slimes on floor 0", and stops dungeon
+            // slimes from splitting on death.
+            com.skyblock.dungeon.listener.DungeonNaturalSpawnGuard dungeonNaturalSpawnGuard =
+                new com.skyblock.dungeon.listener.DungeonNaturalSpawnGuard(
+                    dungeonFloorManager, dungeonFloorBounds, dungeonMobLevelApplicator);
+
             GuildCommand guildCommand = new GuildCommand(guildStorage, guildInviteManager, dungeonDropItemFactory);
 
             DungeonBossGateController dungeonBossGateController =
@@ -506,6 +515,7 @@ public class SkyblockPlugin extends JavaPlugin {
             pm.registerEvents(dungeonFrontierListener, this);
             pm.registerEvents(dungeonChestLootListener, this);
             pm.registerEvents(dungeonBlockProtectionListener, this);
+            pm.registerEvents(dungeonNaturalSpawnGuard, this);
 
             // ── Admin dungeon controls ──────────────────────────────────────
             // "/admin dungeon start": kicks off generation at the Floor 1

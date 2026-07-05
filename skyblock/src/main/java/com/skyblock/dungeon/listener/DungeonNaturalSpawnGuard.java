@@ -9,6 +9,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.CreatureSpawnEvent;
+import org.bukkit.event.entity.SlimeSplitEvent;
 
 /**
  * Two related fixes for the dungeon world's mob spawning, both reported
@@ -39,14 +40,13 @@ import org.bukkit.event.entity.CreatureSpawnEvent;
  *      trigger, both of which use SpawnReason.CUSTOM.
  *
  *   2. FLOOR 0 (the entrance hub): floorForY() returns -1 for the hub's
- *      Y band and any other non-floor gap, so this is also the
- *      definitive place to guard "no hostile mob may exist on floor 0,
- *      regardless of spawn reason" - covering not just natural spawns
- *      but also the (already-guarded, see DungeonRoomMobSpawner) case
- *      of a CUSTOM spawn somehow being asked to fire there, and any
- *      other mob mod/plugin that might otherwise spawn something in
- *      that world entirely outside this plugin's own spawn paths.
- *      Players are never meant to fight anything in the hub.
+ *      Y band and any other non-floor gap. The only mob allowed to
+ *      exist there is DungeonHubBuilder's own Area Zero slime
+ *      population (SpawnReason.CUSTOM, EntityType.SLIME) - every other
+ *      spawn on floor 0, of any type or reason, is blocked. This
+ *      covers not just natural spawns but also any other mob mod/
+ *      plugin that might otherwise spawn something in that world
+ *      entirely outside this plugin's own spawn paths.
  */
 public final class DungeonNaturalSpawnGuard implements Listener {
 
@@ -73,21 +73,57 @@ public final class DungeonNaturalSpawnGuard implements Listener {
         int y = event.getLocation().getBlockY();
         int floorNumber = floorBounds.floorForY(y);
 
-        // Floor 0 / any non-floor gap: no hostile mob may exist here at
-        // all, no matter how it was asked to spawn. This is the fix for
-        // "mobs entering floor 0 or spawning in floor 0."
-        if (floorNumber < 1) {
+        // Anything not explicitly placed by this plugin's own dungeon
+        // spawn machinery (DungeonRoomMobSpawner, boss triggers, and
+        // DungeonHubBuilder's Area Zero slimes all go through
+        // World.spawnEntity(), which fires SpawnReason.CUSTOM) is a
+        // vanilla ambient spawn, or a spawn from some other plugin/mob
+        // mod entirely - block it everywhere in this world, floor 0
+        // included. This is the fix for "natural mobs are spawning in
+        // the dungeon" and "mobs that aren't from the dungeon can't
+        // spawn in the dungeon world."
+        if (event.getSpawnReason() != CreatureSpawnEvent.SpawnReason.CUSTOM) {
             event.setCancelled(true);
             return;
         }
 
-        // Anything not explicitly placed by DungeonRoomMobSpawner/boss
-        // trigger machinery (both use SpawnReason.CUSTOM) is a vanilla
-        // ambient spawn - block it. This is the fix for "natural mobs
-        // are spawning in the dungeon."
-        if (event.getSpawnReason() != CreatureSpawnEvent.SpawnReason.CUSTOM) {
-            event.setCancelled(true);
+        // Floor 0 (Area Zero) is a CUSTOM-spawn exception, not a
+        // blanket ban: DungeonHubBuilder.spawnSlimes() intentionally
+        // populates it with slimes via SpawnReason.CUSTOM, and that's
+        // the only thing allowed to spawn there. Any other floor-0
+        // CUSTOM spawn (e.g. DungeonRoomMobSpawner/boss triggers
+        // firing on floor 0, which should never happen by construction
+        // since both are keyed off floor >= 1 rooms, but is guarded
+        // here defensively) is still blocked, since players are never
+        // meant to fight anything but Area Zero's own slimes in the
+        // hub.
+        if (floorNumber < 1) {
+            // Can't check DungeonHubBuilder's area_zero_slime PDC tag
+            // here - it's stamped onto the entity AFTER
+            // World.spawnEntity() returns, which is after this event
+            // has already fired, so the tag is never present yet at
+            // this point. EntityType.SLIME is a sufficient stand-in:
+            // it's the only entity type this plugin's dungeon spawn
+            // machinery ever places on floor 0 via SpawnReason.CUSTOM.
+            if (event.getEntityType() != org.bukkit.entity.EntityType.SLIME) {
+                event.setCancelled(true);
+            }
         }
+    }
+
+    /**
+     * Dungeon slimes (Area Zero's included) never split on death -
+     * per design, a medium slime dying should just die, not spawn a
+     * cluster of tiny slimes. Vanilla slime-split behavior is
+     * otherwise unconditional on death, so this has to be blocked
+     * explicitly rather than left as a side effect of size/AI changes.
+     */
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void onSlimeSplit(SlimeSplitEvent event) {
+        if (!event.getEntity().getWorld().equals(floorManager.dungeonWorld())) {
+            return; // not our world - never touch other worlds' slimes
+        }
+        event.setCancelled(true);
     }
 
     /**
@@ -108,6 +144,9 @@ public final class DungeonNaturalSpawnGuard implements Listener {
         for (org.bukkit.entity.Entity entity : world.getEntities()) {
             if (!(entity instanceof LivingEntity mob) || mob instanceof Player) {
                 continue;
+            }
+            if (mob instanceof org.bukkit.entity.Slime) {
+                continue; // Area Zero's own slimes belong on floor 0 - never sweep those
             }
             int floorNumber = floorBounds.floorForY(mob.getLocation().getBlockY());
             if (floorNumber < 1) {

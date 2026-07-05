@@ -63,15 +63,6 @@ public final class DungeonGraphPlanner {
     private static final double MIN_BOSS_DISTANCE_FROM_ENTRANCE = FloorBounds.GENERATION_RADIUS * 0.5;
 
     /**
-     * No room (other than the entrance itself and its dedicated gateway
-     * tunnel, see below) may be placed within this many blocks of the
-     * gateway/entrance point - keeps the immediate area around where
-     * players actually walk in from open, so the first thing a player
-     * sees isn't a room wall crowding the doorway.
-     */
-    private static final double GATEWAY_CLEARANCE_RADIUS = 15.0;
-
-    /**
      * Rooms-per-unit-area target, calibrated against the beta's 18-28
      * rooms over a 200x200 = 40,000 block^2 box (i.e. ~0.00055-0.0007
      * rooms per block^2). We use the midpoint of that range.
@@ -118,7 +109,19 @@ public final class DungeonGraphPlanner {
 
         int floorMidY = floorBounds.walkableFloorY(floorNumber) + FloorBounds.FLOOR_HEIGHT / 2;
 
-        // ── Entrance room ────────────────────────────────────────────────────
+        // ── Entrance node ────────────────────────────────────────────────────
+        // The entrance is planted as a plain node in the same graph the
+        // rest of the floor grows from - not a special-cased room with
+        // its own hand-picked tunnel direction/length. It goes into
+        // `placed`/`buckets` exactly like every other room, so the
+        // ordinary spanning-tree growth loop below can pick it as a
+        // parent (or attach a new room to it) using the exact same
+        // logic as any other room-to-room connection. If growth alone
+        // never happens to reach it, bridgeDisconnectedPockets() (the
+        // same guaranteed-connectivity pass used for any other isolated
+        // pocket) connects it to its nearest neighbor afterward - so
+        // "connect the entrance to the nearest room" is just the normal
+        // bridge pass, not bespoke entrance logic.
         DungeonRoom entrance = new DungeonRoom(UUID.randomUUID(),
                 (int) Math.round(entranceX), (int) Math.round(entranceZ),
                 9, 9, DungeonRoom.Type.ENTRANCE,
@@ -129,57 +132,11 @@ public final class DungeonGraphPlanner {
         List<DungeonRoom> placed = new ArrayList<>();
         placed.add(entrance);
 
-        // ── Special gateway cave tunnel ──────────────────────────────────────
-        // The entrance's only guaranteed connection: a single dedicated
-        // tunnel pushing straight out from the gateway to just past
-        // GATEWAY_CLEARANCE_RADIUS, ending in its own room - the one
-        // deliberate exception to the "nothing within 15 blocks of the
-        // gateway" rule enforced in the growth loop below. Wider than an
-        // ordinary tunnel so it reads as a distinct, deliberate passage
-        // out of the entrance rather than just another branch.
-        //
-        // Direction matters here: the entrance sits right at the edge of
-        // the floor's disc (it's placed at the hub's gateway point, only
-        // ~1 block inside isWithinCarveRadius's safe boundary - see
-        // FloorBounds.FLOOR_0_TO_FLOOR_1_OFFSET's zero-gap/zero-overlap
-        // math). Pointing this tunnel FROM the origin TOWARD the entrance
-        // (i.e. atan2(entranceZ-originZ, entranceX-originX)) continues in
-        // that same outward direction past the entrance - straight into
-        // FloorBounds.WALL_BAND_THICKNESS's always-solid ring (and/or
-        // Area Zero's own hub structure) beyond the safe carve radius,
-        // where DungeonRoomPlanner refuses to carve. That silently
-        // stranded the entrance behind an ~8-block uncarvable wall with
-        // no guaranteed path into the rest of the floor. Reversing the
-        // direction so it points from the entrance back toward the
-        // origin sends the guaranteed tunnel into the floor's actual
-        // carvable interior instead.
-        double gatewayAngle = Math.atan2(originZ - entranceZ, originX - entranceX);
-        if (Double.isNaN(gatewayAngle)) {
-            gatewayAngle = 0;
-        }
-        double gatewayTunnelLen = GATEWAY_CLEARANCE_RADIUS + MIN_ROOM_R + 6;
-        double gatewayRoomX = entranceX + Math.cos(gatewayAngle) * gatewayTunnelLen;
-        double gatewayRoomZ = entranceZ + Math.sin(gatewayAngle) * gatewayTunnelLen;
-        double gatewayRoomR = MIN_ROOM_R + rng.nextDouble() * (MAX_ROOM_R - MIN_ROOM_R);
-
-        DungeonRoom gatewayRoom = new DungeonRoom(UUID.randomUUID(),
-                (int) Math.round(gatewayRoomX), (int) Math.round(gatewayRoomZ),
-                (int) Math.round(gatewayRoomR), (int) Math.round(gatewayRoomR),
-                DungeonRoom.Type.NORMAL, floorMidY, 6, rng.nextInt());
-        graph.addRoom(gatewayRoom);
-        addToBucket(buckets, gatewayRoom);
-        placed.add(gatewayRoom);
-
-        DungeonCorridor gatewayTunnel = new DungeonCorridor(UUID.randomUUID(), entrance.id(), gatewayRoom.id(),
-                List.of(new int[]{entrance.centerX(), entrance.centerZ()},
-                        new int[]{gatewayRoom.centerX(), gatewayRoom.centerZ()}),
-                5); // wider than a standard tunnel (MIN_TUNNEL_R..~10) - a deliberate, distinct cave passage
-        graph.addCorridor(gatewayTunnel);
-
         // ── Grow a spanning tree outward from the entrance ──────────────────
-        // Each new room attaches to a random existing room within reach,
-        // biased to prefer less-connected rooms so the tree branches out
-        // across the disc instead of chaining in one long corridor.
+        // Each new room attaches to a random existing room within reach
+        // (the entrance is just one more candidate parent here), biased
+        // to prefer less-connected rooms so the tree branches out across
+        // the disc instead of chaining in one long corridor.
         int attempts = 0;
         int maxAttempts = targetRooms * 12;
         while (placed.size() < targetRooms && attempts < maxAttempts) {
@@ -202,14 +159,6 @@ public final class DungeonGraphPlanner {
                 continue;
             }
             if (Math.hypot(px - parent.centerX(), pz - parent.centerZ()) < MIN_SEG_LEN) {
-                continue;
-            }
-            // Gateway clearance: keep every ordinary room's footprint at
-            // least GATEWAY_CLEARANCE_RADIUS away from the gateway point
-            // itself, so nothing ever crowds the doorway players actually
-            // walk in from. The dedicated gateway tunnel room placed
-            // below is the one deliberate exception.
-            if (Math.hypot(px - entranceX, pz - entranceZ) < GATEWAY_CLEARANCE_RADIUS + roomR) {
                 continue;
             }
 

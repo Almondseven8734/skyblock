@@ -36,17 +36,27 @@ public final class FloorBounds {
      * horizontally from Floor 1's origin.
      *
      * Chosen so Area Zero's outer wall (radius AREA_RADIUS + BORDER_THICKNESS
-     * = 100 + 2 = 102, see DungeonHubBuilder) sits with ZERO gap and ZERO
-     * overlap against Floor 1's own carve-safe boundary
-     * (GENERATION_RADIUS - WALL_BAND_THICKNESS = 2000 - 8 = 1992):
-     *   offset - (AREA_RADIUS + BORDER_THICKNESS) == GENERATION_RADIUS - WALL_BAND_THICKNESS
-     *   2094 - 102 == 1992
+     * = 100 + 2 = 102, see DungeonHubBuilder) has its OUTER FACE sitting
+     * at exactly x = GENERATION_RADIUS (2000) from Floor 1's origin - i.e.
+     * right on Floor 1's generation-radius line, not out past it and not
+     * inside it:
+     *   offset - (AREA_RADIUS + BORDER_THICKNESS) == GENERATION_RADIUS
+     *   2101 - 102 == 1999 (1 block short of 2000 by design/request)
+     * This used to be tuned against GENERATION_RADIUS - WALL_BAND_THICKNESS
+     * (1992) instead, which pulled the whole hub 8 blocks further from
+     * Floor 1's origin than intended and let the wall sit outside Floor
+     * 1's own safe-carve radius, with a solid stone band between the
+     * two that read as "generating inside the dungeon" - Floor 1's cave
+     * carving stops WALL_BAND_THICKNESS (8) short of GENERATION_RADIUS,
+     * so anchoring the hub to that inner line meant its wall/doorway
+     * were parked in the middle of Floor 1's own wall-band buffer
+     * rather than flush against the actual edge of the dungeon.
      * If DungeonHubBuilder's AREA_RADIUS or BORDER_THICKNESS ever change,
-     * this must be recomputed to preserve that invariant, or Area Zero
-     * either clips into Floor 1's generated terrain (offset too small)
-     * or leaves an ungenerated gap between the two (offset too large).
+     * this must be recomputed to preserve that invariant, or Area Zero's
+     * wall either clips past x2000 into Floor 1's carve space (offset
+     * too small) or leaves a gap short of x2000 (offset too large).
      */
-    public static final int FLOOR_0_TO_FLOOR_1_OFFSET = 2094;
+    public static final int FLOOR_0_TO_FLOOR_1_OFFSET = 2101;
 
     /** Minimum separation required between two staircases generated on the same floor. */
     public static final int MIN_STAIRCASE_SEPARATION = 40;

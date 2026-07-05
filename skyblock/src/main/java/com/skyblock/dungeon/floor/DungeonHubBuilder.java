@@ -626,7 +626,7 @@ public final class DungeonHubBuilder {
     }
 
     /**
-     * Spawns MIN_SLIMES..MAX_SLIMES level 1-2 slimes into Area Zero's
+     * Spawns MIN_SLIMES..MAX_SLIMES level 1-2 medium slimes into Area Zero's
      * clearing. Called separately from buildHub() (it needs a
      * JavaPlugin + MobLevelApplicator that aren't available at the
      * point buildHub() first runs during plugin startup) but on the
@@ -683,7 +683,7 @@ public final class DungeonHubBuilder {
             if (!(world.spawnEntity(spawnLoc, org.bukkit.entity.EntityType.SLIME) instanceof org.bukkit.entity.Slime slime)) {
                 continue;
             }
-            slime.setSize(1); // small - reads as "level 1-2", not a hulking dungeon slime
+            slime.setSize(2); // medium (per design) - was 1 (small)
             slime.getPersistentDataContainer().set(tagKey, org.bukkit.persistence.PersistentDataType.BYTE, (byte) 1);
 
             int level = 1 + random.nextInt(2); // level 1 or 2 only, per design
@@ -692,8 +692,10 @@ public final class DungeonHubBuilder {
         }
     }
 
-    private static final int MIN_SLIMES = 4;
-    private static final int MAX_SLIMES = 7;
+    // 10x the original 4-7 range, per design change to make Area Zero
+    // feel busier with slimes.
+    private static final int MIN_SLIMES = 40;
+    private static final int MAX_SLIMES = 70;
 
     /** The location players should be teleported to on /dungeon - the center of Area Zero's clearing. */
     public static Location entranceLocation(World world, FloorBounds floorBounds, int floor1OriginX, int floor1OriginZ) {
@@ -752,6 +754,19 @@ public final class DungeonHubBuilder {
      * they want to use here) exists - it's pure floor-plan math, no
      * Bukkit World needed.
      */
+    public static int hubWestWallOuterFaceX(int floor1OriginX) {
+        int hubCenterX = hubCenterX(floor1OriginX);
+        return hubCenterX - (AREA_RADIUS + BORDER_THICKNESS);
+    }
+
+    public static int doorwayHalfWidth() {
+        return DOORWAY_BOTTOM_HALF_WIDTH;
+    }
+
+    public static int doorwayHeight() {
+        return DOORWAY_TOTAL_HEIGHT;
+    }
+
     public static double[] gatewayPoint(int floor1OriginX, int floor1OriginZ) {
         int hubCenterX = hubCenterX(floor1OriginX);
         int hubCenterZ = hubCenterZ(floor1OriginZ);

@@ -1,6 +1,7 @@
 package com.skyblock.dungeon.gen;
 
 import com.skyblock.dungeon.config.FloorTheme;
+import com.skyblock.dungeon.floor.DungeonHubBuilder;
 import com.skyblock.dungeon.util.FloorBounds;
 import org.bukkit.Material;
 import org.bukkit.World;
@@ -365,6 +366,20 @@ public final class DungeonRoomPlanner {
 
     // ─── Cave carving ────────────────────────────────────────────────────────
 
+    /**
+     * Room types allowed to carve past the wall band (isWithinCarveRadius's
+     * boundary) instead of being capped by it like ordinary generation.
+     * ENTRANCE is the floor's gateway node, which can legitimately sit
+     * right at the edge of the disc; BUFFER is a staircase landing from
+     * the floor above, which is placed at a specific incoming position
+     * this planner doesn't control either. Both need to carve through
+     * regardless of exactly where that happens to fall relative to the
+     * wall band.
+     */
+    private static boolean isWallBandWhitelisted(DungeonRoom.Type type) {
+        return type == DungeonRoom.Type.ENTRANCE || type == DungeonRoom.Type.BUFFER;
+    }
+
     /** Entry point used by DungeonCarveScheduler to actually perform a queued carve. Package-visible on purpose. */
     void carveChunkColumnFromScheduler(World world, int chunkX, int chunkZ) {
         carveChunkColumn(world, chunkX, chunkZ);
@@ -389,6 +404,11 @@ public final class DungeonRoomPlanner {
         int floorTopY    = floorBounds.floorTopY(floorNumber);
         int bandMinY = floorBottomY + 1;             // one safety layer above the absolute floor
         int bandMaxY = floorTopY - 2;                 // one safety layer below the absolute ceiling
+
+        // Only meaningful on floor 1 (see the guard below), but cheap
+        // enough to always compute from this floor's own origin rather
+        // than special-casing the call site.
+        int hubWestWallOuterFaceX = DungeonHubBuilder.hubWestWallOuterFaceX((int) Math.round(originX));
 
         List<Material> primary = theme.getPrimaryBlocks();
         List<Material> accent  = theme.getAccentBlocks();
@@ -422,40 +442,73 @@ public final class DungeonRoomPlanner {
                     continue;
                 }
 
+                // Floor 1 only: never touch anything at or east of Area
+                // Zero's west wall outer face. That's the hub's own
+                // territory - buildHub() already placed its wall and
+                // doorway breach there, and the entrance tunnel this
+                // planner grows west from the gateway point must stop
+                // short of it and hand off cleanly, not carve back
+                // through it. Without this guard, the SDF carve pass
+                // (which has no concept of the hub at all) would
+                // eventually reseal the doorway with stone or blow extra
+                // holes through the wall the moment a player's frontier
+                // reached this far east - silently undoing buildHub()'s
+                // work after the fact, every time this chunk got
+                // (re)carved.
+                if (floorNumber == 1 && wx >= hubWestWallOuterFaceX) {
+                    continue;
+                }
+
                 boolean withinSafeCarveRadius = floorBounds.isWithinCarveRadius(originX, originZ, wx, wz);
 
                 for (int y = bandMinY; y <= bandMaxY; y++) {
                     boolean open = false;
 
-                    if (withinSafeCarveRadius) {
-                        for (DungeonRoom room : nearbyRooms) {
-                            if (room.type() == DungeonRoom.Type.BOSS) continue; // handled above
-                            double sdf = SdfShapes.irregularRoomSDF(wx, y, wz,
-                                    room.centerX(), room.floorY(), room.centerZ(),
-                                    room.radiusX(), room.domeH(), room.radiusZ(), room.noiseSeed());
-                            if (sdf <= 0) {
+                    // The wall band (isWithinCarveRadius's boundary) is a
+                    // GENERATION LIMIT for ordinary rooms/corridors, not
+                    // an unconditional hard wall - WALL_BAND-listed room
+                    // types (ENTRANCE, and any BUFFER staircase landing)
+                    // are allowed to carve straight through it, since
+                    // those are legitimate floor features that can
+                    // legitimately sit right at the edge of the disc
+                    // (e.g. the entrance node planted at the hub gateway
+                    // point). Everything else still respects the band,
+                    // guaranteeing WALL_BAND_THICKNESS of solid stone
+                    // between ordinary cave space and the void beyond
+                    // GENERATION_RADIUS.
+                    for (DungeonRoom room : nearbyRooms) {
+                        if (room.type() == DungeonRoom.Type.BOSS) continue; // handled above
+                        if (!withinSafeCarveRadius && !isWallBandWhitelisted(room.type())) continue;
+                        double sdf = SdfShapes.irregularRoomSDF(wx, y, wz,
+                                room.centerX(), room.floorY(), room.centerZ(),
+                                room.radiusX(), room.domeH(), room.radiusZ(), room.noiseSeed());
+                        if (sdf <= 0) {
+                            open = true;
+                            break;
+                        }
+                    }
+                    if (!open) {
+                        for (DungeonCorridor corridor : nearbyCorridors) {
+                            DungeonRoom fromRoom = graph.getRoom(corridor.fromRoomId());
+                            DungeonRoom toRoom = graph.getRoom(corridor.toRoomId());
+                            boolean corridorWhitelisted =
+                                    (fromRoom != null && isWallBandWhitelisted(fromRoom.type()))
+                                    || (toRoom != null && isWallBandWhitelisted(toRoom.type()));
+                            if (!withinSafeCarveRadius && !corridorWhitelisted) continue;
+
+                            List<int[]> wp = corridor.waypoints();
+                            boolean insideAnySegment = false;
+                            double ay = fromRoom != null ? fromRoom.floorY() : y;
+                            double by = toRoom != null ? toRoom.floorY() : y;
+                            for (int i = 0; i < wp.size() - 1 && !insideAnySegment; i++) {
+                                int[] a = wp.get(i);
+                                int[] b = wp.get(i + 1);
+                                insideAnySegment = SdfShapes.tunnelArchSDF(wx, y, wz,
+                                        a[0], ay, a[1], b[0], by, b[1], corridor.width());
+                            }
+                            if (insideAnySegment) {
                                 open = true;
                                 break;
-                            }
-                        }
-                        if (!open) {
-                            for (DungeonCorridor corridor : nearbyCorridors) {
-                                List<int[]> wp = corridor.waypoints();
-                                boolean insideAnySegment = false;
-                                DungeonRoom fromRoom = graph.getRoom(corridor.fromRoomId());
-                                DungeonRoom toRoom = graph.getRoom(corridor.toRoomId());
-                                double ay = fromRoom != null ? fromRoom.floorY() : y;
-                                double by = toRoom != null ? toRoom.floorY() : y;
-                                for (int i = 0; i < wp.size() - 1 && !insideAnySegment; i++) {
-                                    int[] a = wp.get(i);
-                                    int[] b = wp.get(i + 1);
-                                    insideAnySegment = SdfShapes.tunnelArchSDF(wx, y, wz,
-                                            a[0], ay, a[1], b[0], by, b[1], corridor.width());
-                                }
-                                if (insideAnySegment) {
-                                    open = true;
-                                    break;
-                                }
                             }
                         }
                     }
