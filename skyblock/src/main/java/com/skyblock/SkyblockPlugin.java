@@ -274,6 +274,18 @@ public class SkyblockPlugin extends JavaPlugin {
             MobLevelRoller dungeonMobLevelRoller =
                 new MobLevelRoller(dungeonFloorBounds.maxFloorCount(), dungeonRandom);
             MobLevelApplicator dungeonMobLevelApplicator = new MobLevelApplicator(this);
+
+            // Area Zero's slimes and portal flicker need a JavaPlugin +
+            // MobLevelApplicator that don't exist yet at the buildHub()
+            // call site above - wired here instead, same timing (once at
+            // startup, once per weekly reset via setOnWorldRecreated below).
+            DungeonHubBuilder.spawnSlimes(dungeonWorld, dungeonFloorBounds, (int) floor1OriginX, (int) floor1OriginZ,
+                    this, dungeonMobLevelApplicator, dungeonRandom);
+            org.bukkit.scheduler.BukkitTask[] dungeonPortalAnimationTask = {
+                    com.skyblock.dungeon.floor.AreaZeroPortalAnimator.start(this, dungeonWorld,
+                            DungeonHubBuilder.portalGlassCoordinates(dungeonFloorBounds, (int) floor1OriginX, (int) floor1OriginZ))
+            };
+
             DungeonRoomMobSpawner dungeonMobSpawner = new DungeonRoomMobSpawner(
                 this, dungeonThemeRegistry, dungeonMobLevelRoller, dungeonMobLevelApplicator, dungeonRandom,
                 dungeonFloorManager
@@ -451,6 +463,13 @@ public class SkyblockPlugin extends JavaPlugin {
                 dungeonCommand.setFloor0Location(newFloor0Location);
                 dungeonPortalHandler.updatePortalBounds(newPortalCorner1, newPortalCorner2);
                 dungeonBlockProtectionListener.setDungeonWorld(newWorld);
+
+                DungeonHubBuilder.spawnSlimes(newWorld, dungeonFloorBounds, (int) floor1OriginX, (int) floor1OriginZ,
+                        this, dungeonMobLevelApplicator, dungeonRandom);
+                dungeonPortalAnimationTask[0].cancel();
+                dungeonPortalAnimationTask[0] = com.skyblock.dungeon.floor.AreaZeroPortalAnimator.start(
+                        this, newWorld,
+                        DungeonHubBuilder.portalGlassCoordinates(dungeonFloorBounds, (int) floor1OriginX, (int) floor1OriginZ));
 
                 // The weekly wipe makes all previously persisted floor state
                 // (carved chunks, staircases, boss rooms, cleared floors)

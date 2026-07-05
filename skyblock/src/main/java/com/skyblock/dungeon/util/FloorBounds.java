@@ -31,8 +31,22 @@ public final class FloorBounds {
     /** Combined vertical footprint of one floor slot (floor + its bottom border). */
     public static final int FLOOR_SLOT_HEIGHT = FLOOR_HEIGHT + FLOOR_BORDER;
 
-    /** Floor 0 (the entrance hub) is offset this far horizontally from Floor 1's origin. */
-    public static final int FLOOR_0_TO_FLOOR_1_OFFSET = 2000;
+    /**
+     * Floor 0 (the "Area Zero" entrance hub) is offset this far
+     * horizontally from Floor 1's origin.
+     *
+     * Chosen so Area Zero's outer wall (radius AREA_RADIUS + BORDER_THICKNESS
+     * = 25 + 2 = 27, see DungeonHubBuilder) sits with ZERO gap and ZERO
+     * overlap against Floor 1's own carve-safe boundary
+     * (GENERATION_RADIUS - WALL_BAND_THICKNESS = 2000 - 8 = 1992):
+     *   offset - (AREA_RADIUS + BORDER_THICKNESS) == GENERATION_RADIUS - WALL_BAND_THICKNESS
+     *   2019 - 27 == 1992
+     * If DungeonHubBuilder's AREA_RADIUS or BORDER_THICKNESS ever change,
+     * this must be recomputed to preserve that invariant, or Area Zero
+     * either clips into Floor 1's generated terrain (offset too small)
+     * or leaves an ungenerated gap between the two (offset too large).
+     */
+    public static final int FLOOR_0_TO_FLOOR_1_OFFSET = 2019;
 
     /** Minimum separation required between two staircases generated on the same floor. */
     public static final int MIN_STAIRCASE_SEPARATION = 40;

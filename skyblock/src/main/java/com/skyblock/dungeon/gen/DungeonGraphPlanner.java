@@ -63,6 +63,15 @@ public final class DungeonGraphPlanner {
     private static final double MIN_BOSS_DISTANCE_FROM_ENTRANCE = FloorBounds.GENERATION_RADIUS * 0.5;
 
     /**
+     * No room (other than the entrance itself and its dedicated gateway
+     * tunnel, see below) may be placed within this many blocks of the
+     * gateway/entrance point - keeps the immediate area around where
+     * players actually walk in from open, so the first thing a player
+     * sees isn't a room wall crowding the doorway.
+     */
+    private static final double GATEWAY_CLEARANCE_RADIUS = 15.0;
+
+    /**
      * Rooms-per-unit-area target, calibrated against the beta's 18-28
      * rooms over a 200x200 = 40,000 block^2 box (i.e. ~0.00055-0.0007
      * rooms per block^2). We use the midpoint of that range.
@@ -120,6 +129,37 @@ public final class DungeonGraphPlanner {
         List<DungeonRoom> placed = new ArrayList<>();
         placed.add(entrance);
 
+        // ── Special gateway cave tunnel ──────────────────────────────────────
+        // The entrance's only guaranteed connection: a single dedicated
+        // tunnel pushing straight out from the gateway to just past
+        // GATEWAY_CLEARANCE_RADIUS, ending in its own room - the one
+        // deliberate exception to the "nothing within 15 blocks of the
+        // gateway" rule enforced in the growth loop below. Wider than an
+        // ordinary tunnel so it reads as a distinct, deliberate passage
+        // out of the entrance rather than just another branch.
+        double gatewayAngle = Math.atan2(entranceZ - originZ, entranceX - originX);
+        if (Double.isNaN(gatewayAngle)) {
+            gatewayAngle = 0;
+        }
+        double gatewayTunnelLen = GATEWAY_CLEARANCE_RADIUS + MIN_ROOM_R + 6;
+        double gatewayRoomX = entranceX + Math.cos(gatewayAngle) * gatewayTunnelLen;
+        double gatewayRoomZ = entranceZ + Math.sin(gatewayAngle) * gatewayTunnelLen;
+        double gatewayRoomR = MIN_ROOM_R + rng.nextDouble() * (MAX_ROOM_R - MIN_ROOM_R);
+
+        DungeonRoom gatewayRoom = new DungeonRoom(UUID.randomUUID(),
+                (int) Math.round(gatewayRoomX), (int) Math.round(gatewayRoomZ),
+                (int) Math.round(gatewayRoomR), (int) Math.round(gatewayRoomR),
+                DungeonRoom.Type.NORMAL, floorMidY, 6, rng.nextInt());
+        graph.addRoom(gatewayRoom);
+        addToBucket(buckets, gatewayRoom);
+        placed.add(gatewayRoom);
+
+        DungeonCorridor gatewayTunnel = new DungeonCorridor(UUID.randomUUID(), entrance.id(), gatewayRoom.id(),
+                List.of(new int[]{entrance.centerX(), entrance.centerZ()},
+                        new int[]{gatewayRoom.centerX(), gatewayRoom.centerZ()}),
+                5); // wider than a standard tunnel (MIN_TUNNEL_R..~10) - a deliberate, distinct cave passage
+        graph.addCorridor(gatewayTunnel);
+
         // ── Grow a spanning tree outward from the entrance ──────────────────
         // Each new room attaches to a random existing room within reach,
         // biased to prefer less-connected rooms so the tree branches out
@@ -146,6 +186,14 @@ public final class DungeonGraphPlanner {
                 continue;
             }
             if (Math.hypot(px - parent.centerX(), pz - parent.centerZ()) < MIN_SEG_LEN) {
+                continue;
+            }
+            // Gateway clearance: keep every ordinary room's footprint at
+            // least GATEWAY_CLEARANCE_RADIUS away from the gateway point
+            // itself, so nothing ever crowds the doorway players actually
+            // walk in from. The dedicated gateway tunnel room placed
+            // below is the one deliberate exception.
+            if (Math.hypot(px - entranceX, pz - entranceZ) < GATEWAY_CLEARANCE_RADIUS + roomR) {
                 continue;
             }
 

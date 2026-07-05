@@ -44,6 +44,7 @@
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/drops/DungeonDropItemFactory.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/drops/DungeonDropRegistry.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/drops/DungeonMobDropListener.java
+/workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/floor/AreaZeroPortalAnimator.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/floor/BossKillTracker.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/floor/DungeonFloorManager.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/floor/DungeonFloorStateStorage.java

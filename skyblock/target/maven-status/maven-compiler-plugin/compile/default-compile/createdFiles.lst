@@ -85,6 +85,7 @@ com/skyblock/dungeon/gen/DungeonBossRoomGeometry$Gate.class
 com/skyblock/crates/CrateSystem.class
 com/skyblock/ah/AhStorage$Listing.class
 com/skyblock/dungeon/spawn/DungeonSpawnLocator.class
+com/skyblock/dungeon/floor/AreaZeroPortalAnimator.class
 com/skyblock/shop/AdminShopSystem$MenuType.class
 com/skyblock/SkyblockPlugin.class
 com/skyblock/ah/AhSystem$1.class
@@ -143,6 +144,7 @@ com/skyblock/dungeon/config/FloorThemeRegistry$DepthBand.class
 com/skyblock/dungeon/listener/DungeonDeathHandler.class
 com/skyblock/dungeon/classes/ClassCommand.class
 com/skyblock/island/IslandCommands$2.class
+com/skyblock/dungeon/floor/DungeonHubBuilder$CellSetter.class
 com/skyblock/admin/AdminSystem.class
 com/skyblock/island/IslandCommands.class
 com/skyblock/dungeon/gen/DungeonCarveScheduler.class
@@ -156,6 +158,7 @@ com/skyblock/shop/ShopSystem$Session.class
 com/skyblock/shop/GemshopSystem$EntryType.class
 com/skyblock/guild/GuildInviteManager.class
 com/skyblock/admin/AdminSystem$InputMode.class
+com/skyblock/dungeon/floor/AreaZeroPortalAnimator$Cell.class
 com/skyblock/island/IslandStorage.class
 com/skyblock/island/IslandStorage$1.class
 com/skyblock/dungeon/gen/DungeonRoomPlanner$RoomCarveListener.class
