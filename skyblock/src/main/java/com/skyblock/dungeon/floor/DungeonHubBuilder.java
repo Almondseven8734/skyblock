@@ -13,7 +13,7 @@ import java.util.Random;
 /**
  * Builds "Area Zero": Floor 0's entrance hub. Unlike every other
  * floor, Area Zero never procedurally generates or changes shape - it's
- * a small, fixed forest clearing enclosed by a circular R25 stone
+ * a small, fixed forest clearing enclosed by a circular R100 stone
  * border, hand-placed the same way every time (buildHub() is
  * idempotent-safe to call repeatedly - see class docs on
  * DungeonResetScheduler.setOnWorldRecreated wiring). Terrain height and
@@ -23,15 +23,20 @@ import java.util.Random;
  *
  * Layout, looking down:
  *   - A circular clearing of radius AREA_RADIUS, walled by a
- *     BORDER_THICKNESS-thick ring of stone.
+ *     BORDER_THICKNESS-thick ring of stone. Ground height is a smooth
+ *     (bilinear/smoothstep-interpolated) rolling terrain rather than
+ *     flat stepped plateaus - see terrainHeight() below.
  *   - A 5-wide, 8-tall doorway breach on the WEST side (-X), opening
  *     directly into Floor 1's cave system - this is the only side that
  *     borders the dungeon, and per design the border wall must NEVER
  *     clip into Floor 1's own generated terrain (see
  *     FloorBounds.FLOOR_0_TO_FLOOR_1_OFFSET's docs for the exact
  *     zero-gap/zero-overlap invariant this depends on).
- *   - A matching 5-wide, 8-tall breach on the OPPOSITE (EAST, +X) side,
- *     filled with animated dark blue / dark purple stained glass
+ *   - A matching 5-wide, 8-tall breach on the OPPOSITE (EAST, +X) side:
+ *     the approach path through the border ring is carved to air (so
+ *     it's actually walkable, not just a single accessible-from-nowhere
+ *     glass column), stopping one column shy of the outer face, which
+ *     is filled with animated dark blue / dark purple stained glass
  *     (the portal) backed by one more layer of the border's own stone
  *     one block further out, so the portal doesn't read as a hole into
  *     the void from outside.
@@ -51,8 +56,8 @@ import java.util.Random;
  */
 public final class DungeonHubBuilder {
 
-    /** Radius (blocks) of the walkable forest clearing, per design ("fits inside an R25 stone border"). */
-    private static final int AREA_RADIUS = 25;
+    /** Radius (blocks) of the walkable forest clearing, per design ("fits inside an R100 stone border"). */
+    private static final int AREA_RADIUS = 100;
     /** Thickness of the stone border ring just outside AREA_RADIUS. */
     private static final int BORDER_THICKNESS = 2;
     /** Height of the border wall above the ground band. */
@@ -62,7 +67,7 @@ public final class DungeonHubBuilder {
 
     /** Terrain height variation: ground can sit 0-2 blocks above the base band (i.e. "1-3 blocks of variation"). */
     private static final int TERRAIN_VARIATION_LEVELS = 3;
-    /** Side length (blocks) of the flat terrain-height cells - keeps bumps chunky/hill-like rather than 1-block noise. */
+    /** Spacing (blocks) between terrain-height control points, interpolated smoothly between them - gentle rolling hills rather than 1-block noise. */
     private static final int TERRAIN_CELL_SIZE = 4;
 
     /** Doorway/portal shared shape: bottom rows are 5 wide, the top row narrows to 3 wide, both centered. */
@@ -79,8 +84,11 @@ public final class DungeonHubBuilder {
     private static final Material PORTAL_COLOR_A = Material.BLUE_STAINED_GLASS;
     private static final Material PORTAL_COLOR_B = Material.PURPLE_STAINED_GLASS;
 
-    private static final int MIN_TREES = 10;
-    private static final int MAX_TREES = 16;
+    // Scaled to hold the same tree density as the old R25 clearing
+    // (10-16 trees over ~1,963 block^2) now that the clearing area is
+    // ~16x larger (R100 -> ~31,400 block^2): 10-16 * 16 ~= 160-256.
+    private static final int MIN_TREES = 160;
+    private static final int MAX_TREES = 256;
 
     private DungeonHubBuilder() {
     }
@@ -148,7 +156,7 @@ public final class DungeonHubBuilder {
         placeTrees(world, floorBounds, hubFloorY, hubCenterX, hubCenterZ, rng);
     }
 
-    /** Ground column inside the clearing: rolls a chunky height bump, fills it in, clears air above. */
+    /** Ground column inside the clearing: rolls a smooth interpolated height, fills it in, clears air above. */
     private static void buildTerrainColumn(World world, int hubFloorY, int worldX, int worldZ, int localX, int localZ) {
         int level = terrainLevel(worldX, worldZ);
         int surfaceY = hubFloorY + level;
@@ -181,22 +189,60 @@ public final class DungeonHubBuilder {
     }
 
     /**
-     * Deterministic chunky terrain height for a world column: blocks are
-     * grouped into TERRAIN_CELL_SIZE x TERRAIN_CELL_SIZE cells, each
-     * cell rolling its own flat level in [0, TERRAIN_VARIATION_LEVELS-1]
-     * (0-2, i.e. 3 possible levels / up to 2 blocks of relief - "1-3
-     * blocks of variation" across the clearing) - a coordinate hash
-     * rather than a stored seed, so it's naturally idempotent across
-     * rebuilds without needing to persist a heightmap.
+     * Deterministic, continuous-valued height at one of the coarse
+     * TERRAIN_CELL_SIZE-spaced grid corners, in [0, TERRAIN_VARIATION_LEVELS-1]
+     * (0-2, i.e. up to 2 blocks of relief across the clearing) - a
+     * coordinate hash rather than a stored seed, so it's naturally
+     * idempotent across rebuilds without needing to persist a heightmap.
      */
-    private static int terrainLevel(int worldX, int worldZ) {
-        int cellX = Math.floorDiv(worldX, TERRAIN_CELL_SIZE);
-        int cellZ = Math.floorDiv(worldZ, TERRAIN_CELL_SIZE);
+    private static double cornerHeight(int cellX, int cellZ) {
         long seed = 0x9E3779B97F4A7C15L
                 ^ ((long) cellX * 0xBF58476D1CE4E5B9L)
                 ^ ((long) cellZ * 0x94D049BB133111EBL);
         Random cellRng = new Random(seed);
-        return cellRng.nextInt(TERRAIN_VARIATION_LEVELS);
+        return cellRng.nextDouble() * (TERRAIN_VARIATION_LEVELS - 1);
+    }
+
+    /**
+     * Smooth terrain height for a world column: bilinearly interpolates
+     * between the four surrounding TERRAIN_CELL_SIZE-spaced grid corner
+     * heights, with a smoothstep easing curve on each axis so the
+     * result reads as gently rolling hills rather than the old flat,
+     * hard-edged TERRAIN_CELL_SIZE x TERRAIN_CELL_SIZE plateaus.
+     */
+    private static double terrainHeight(int worldX, int worldZ) {
+        double gx = (double) worldX / TERRAIN_CELL_SIZE;
+        double gz = (double) worldZ / TERRAIN_CELL_SIZE;
+        int x0 = (int) Math.floor(gx);
+        int z0 = (int) Math.floor(gz);
+        int x1 = x0 + 1;
+        int z1 = z0 + 1;
+
+        double tx = gx - x0;
+        double tz = gz - z0;
+        double sx = tx * tx * (3 - 2 * tx); // smoothstep easing
+        double sz = tz * tz * (3 - 2 * tz);
+
+        double h00 = cornerHeight(x0, z0);
+        double h10 = cornerHeight(x1, z0);
+        double h01 = cornerHeight(x0, z1);
+        double h11 = cornerHeight(x1, z1);
+
+        double top = h00 + (h10 - h00) * sx;
+        double bottom = h01 + (h11 - h01) * sx;
+        return top + (bottom - top) * sz;
+    }
+
+    /**
+     * Integer block level a column's surface should sit at - the
+     * smooth terrainHeight() rounded to the nearest block, since the
+     * world is still voxel-quantized even though the underlying height
+     * field driving it is continuous. Neighboring columns now only
+     * ever differ by ~1 block (a walkable, staircase-like slope)
+     * instead of jumping between whole flat plateaus.
+     */
+    private static int terrainLevel(int worldX, int worldZ) {
+        return (int) Math.round(terrainHeight(worldX, worldZ));
     }
 
     /**
@@ -235,11 +281,33 @@ public final class DungeonHubBuilder {
      * purple stained glass instead of carved to air, and backed one
      * block further out by the border's own stone so it doesn't read as
      * a hole into the void when viewed from outside the wall.
+     *
+     * The border ring is circular, so a flat single-X-column breach
+     * doesn't line up with the ring's true curvature: at the flanking
+     * Z offsets of the 5-wide breach, the ring is thicker (measured
+     * along X) than it is at the center, which previously left a
+     * leftover, uncarved layer of solid border stone between the
+     * clearing and the glass everywhere except the dead center - i.e.
+     * only one block of the whole breach was actually walkable. Fixed
+     * by carving the ENTIRE approach - every column between the
+     * clearing's edge and the glass itself - to air first, in the same
+     * tapered doorway shape, before placing the glass.
      */
     private static void buildPortalFrame(World world, int hubFloorY, int hubCenterX, int hubCenterZ) {
         int maxRadius = AREA_RADIUS + BORDER_THICKNESS;
         int glassX = hubCenterX + maxRadius - 1; // sits within the wall band, one layer shy of the outer face
         int backerX = hubCenterX + maxRadius + 1; // one block beyond the wall's outer face
+
+        // Approach path: carve every border column between the
+        // clearing's edge (AREA_RADIUS - 1) and the glass (exclusive)
+        // to air, in the same tapered silhouette as the doorway, so the
+        // whole breach is walkable up to the glass regardless of how
+        // the circular ring's thickness varies across the breach's width.
+        for (int r = AREA_RADIUS - 1; r < glassX - hubCenterX; r++) {
+            int worldX = hubCenterX + r;
+            forEachDoorwayCell(cell -> world.getBlockAt(worldX, cell[0], cell[1]).setType(Material.AIR, false),
+                    hubFloorY, hubCenterZ);
+        }
 
         Random glassRng = new Random(0xB012741L ^ ((long) hubCenterX << 20 | (hubCenterZ & 0xFFFFF)));
         for (int dz = -DOORWAY_BOTTOM_HALF_WIDTH; dz <= DOORWAY_BOTTOM_HALF_WIDTH; dz++) {
@@ -260,9 +328,15 @@ public final class DungeonHubBuilder {
                 world.getBlockAt(backerX, hubFloorY + row, hubCenterZ + dz).setType(BORDER_MATERIAL, false);
             }
         }
-        // Ground lip on the interior (walkable) side, matching the doorway's.
-        for (int dz = -DOORWAY_BOTTOM_HALF_WIDTH; dz <= DOORWAY_BOTTOM_HALF_WIDTH; dz++) {
-            world.getBlockAt(hubCenterX + AREA_RADIUS - 1, hubFloorY, hubCenterZ + dz).setType(GROUND_SURFACE, false);
+        // Ground lip across the WHOLE approach (interior clearing edge
+        // through to the foot of the glass), not just a single column,
+        // so the newly-walkable breach reads as one continuous floor
+        // instead of stopping dead at the clearing's edge.
+        for (int r = AREA_RADIUS - 1; r < glassX - hubCenterX; r++) {
+            int worldX = hubCenterX + r;
+            for (int dz = -DOORWAY_BOTTOM_HALF_WIDTH; dz <= DOORWAY_BOTTOM_HALF_WIDTH; dz++) {
+                world.getBlockAt(worldX, hubFloorY, hubCenterZ + dz).setType(GROUND_SURFACE, false);
+            }
         }
     }
 
@@ -306,12 +380,13 @@ public final class DungeonHubBuilder {
     }
 
     /**
-     * Places MIN_TREES..MAX_TREES custom multi-limb trees at random
-     * valid clearing spots - avoiding the border ring, both doorway
-     * mouths, and each other. Each tree is a trunk (4-6 tall) with 2-4
-     * diagonal limbs branching partway up, each limb capped with a
-     * small leaf cluster, plus a leaf cluster on the trunk's own top -
-     * distinctly NOT a vanilla single-trunk-plus-canopy shape.
+     * Places MIN_TREES..MAX_TREES large custom trees at random valid
+     * clearing spots - avoiding the border ring, both doorway mouths,
+     * and each other. Each tree has buttress roots flaring from its
+     * base, a tall trunk (8-14, thick 2x2 near the ground) and 3-5
+     * large sweeping branches, each capped with a big leaf cluster,
+     * plus a leaf cluster on the trunk's own top - distinctly NOT a
+     * vanilla single-log-trunk-plus-canopy shape.
      */
     private static void placeTrees(World world, FloorBounds floorBounds, int hubFloorY,
                                     int hubCenterX, int hubCenterZ, Random rng) {
@@ -338,7 +413,7 @@ public final class DungeonHubBuilder {
 
             boolean tooClose = false;
             for (int[] other : placedAt) {
-                if (Math.hypot(x - other[0], z - other[1]) < 4) {
+                if (Math.hypot(x - other[0], z - other[1]) < 7) {
                     tooClose = true;
                     break;
                 }
@@ -355,35 +430,88 @@ public final class DungeonHubBuilder {
         }
     }
 
-    /** Builds one custom multi-limb tree: a trunk plus several branching limbs, each capped with leaves. */
+    /**
+     * Builds one large custom tree: buttress roots flaring out from the
+     * base, a tall thick trunk (double-width near the ground, tapering
+     * to a single column higher up), and several large, thick, multi-
+     * segment branches capped with big leaf clusters - explicitly NOT
+     * vanilla scale/shape (thin single-log trunk, short stubby limbs).
+     */
     private static void buildTree(World world, int baseX, int baseY, int baseZ, Random rng) {
-        int trunkHeight = 4 + rng.nextInt(3); // 4-6
+        int trunkHeight = 8 + rng.nextInt(7); // 8-14, tall
+
+        // Root flares: short log stubs radiating outward along the
+        // ground from the base before the trunk rises, reading as
+        // buttress roots rather than a tree just planted flat on top.
+        int rootCount = 4 + rng.nextInt(3); // 4-6
+        for (int i = 0; i < rootCount; i++) {
+            double angle = (Math.PI * 2 * i / rootCount) + (rng.nextDouble() - 0.5) * 0.6;
+            int rootLength = 2 + rng.nextInt(3); // 2-4
+            double dx = Math.cos(angle);
+            double dz = Math.sin(angle);
+            double x = baseX;
+            double z = baseZ;
+            for (int step = 0; step < rootLength; step++) {
+                x += dx;
+                z += dz;
+                // Roots dip slightly as they extend, then the ground
+                // itself resumes - only touch the base and one layer
+                // below so they read as gnarled roots, not a flat spoke.
+                int ry = baseY - (step >= rootLength - 1 ? 1 : 0);
+                world.getBlockAt((int) Math.round(x), ry, (int) Math.round(z)).setType(TRUNK_MATERIAL, false);
+            }
+        }
+
+        // Trunk: a thick 2x2 base tapering to a single column for the
+        // upper ~40% of the trunk's height, so it reads as a large,
+        // heavy tree rather than a single-block-wide vanilla trunk.
+        int thickUntil = (int) Math.round(trunkHeight * 0.6);
         for (int dy = 0; dy < trunkHeight; dy++) {
             world.getBlockAt(baseX, baseY + dy, baseZ).setType(TRUNK_MATERIAL, false);
+            if (dy < thickUntil) {
+                world.getBlockAt(baseX + 1, baseY + dy, baseZ).setType(TRUNK_MATERIAL, false);
+                world.getBlockAt(baseX, baseY + dy, baseZ + 1).setType(TRUNK_MATERIAL, false);
+                world.getBlockAt(baseX + 1, baseY + dy, baseZ + 1).setType(TRUNK_MATERIAL, false);
+            }
         }
-        leafCluster(world, baseX, baseY + trunkHeight, baseZ, 2);
+        leafCluster(world, baseX, baseY + trunkHeight, baseZ, 3);
 
-        int limbCount = 2 + rng.nextInt(3); // 2-4
+        // Large branches: thick (2-log-wide cross-section), long,
+        // sweeping limbs starting partway up the trunk, each capped
+        // with a big leaf cluster.
+        int limbCount = 3 + rng.nextInt(3); // 3-5
         for (int i = 0; i < limbCount; i++) {
-            int startY = baseY + Math.max(1, (int) (trunkHeight * (0.4 + rng.nextDouble() * 0.5)));
+            int startY = baseY + Math.max(2, (int) (trunkHeight * (0.35 + rng.nextDouble() * 0.4)));
             double angle = rng.nextDouble() * Math.PI * 2;
-            int limbLength = 2 + rng.nextInt(3); // 2-4
+            int limbLength = 5 + rng.nextInt(5); // 5-9, large sweeping branches
 
             double x = baseX;
             double y = startY;
             double z = baseZ;
             double dx = Math.cos(angle);
             double dz = Math.sin(angle);
-            double dyStep = 0.6; // limbs angle upward as they extend
+            // Perpendicular offset so the branch's second log (the
+            // "thickness") sits beside the path rather than on top of it.
+            double px = -Math.sin(angle);
+            double pz = Math.cos(angle);
+            double dyStep = 0.5; // branches angle upward as they extend
 
             for (int step = 0; step < limbLength; step++) {
                 x += dx;
                 y += dyStep;
                 z += dz;
-                world.getBlockAt((int) Math.round(x), (int) Math.round(y), (int) Math.round(z))
-                        .setType(TRUNK_MATERIAL, false);
+                int bx = (int) Math.round(x);
+                int by = (int) Math.round(y);
+                int bz = (int) Math.round(z);
+                world.getBlockAt(bx, by, bz).setType(TRUNK_MATERIAL, false);
+                // Thicken the first two-thirds of the branch so it
+                // reads as a heavy limb, tapering to a single log near the tip.
+                if (step < limbLength * 2 / 3) {
+                    world.getBlockAt(bx + (int) Math.round(px), by, bz + (int) Math.round(pz))
+                            .setType(TRUNK_MATERIAL, false);
+                }
             }
-            leafCluster(world, (int) Math.round(x), (int) Math.round(y), (int) Math.round(z), 2);
+            leafCluster(world, (int) Math.round(x), (int) Math.round(y), (int) Math.round(z), 3);
         }
     }
 
@@ -482,21 +610,40 @@ public final class DungeonHubBuilder {
         return new Location(world, hubCenterX + 0.5, groundY + 1, hubCenterZ + 0.5);
     }
 
-    /** Corner 1 of the portal's trigger volume - a small pocket just inside the east glass wall. */
+    /**
+     * Corner 1 of the portal's trigger volume. DungeonPortalHandler only
+     * supports a single axis-aligned box, so this is deliberately
+     * restricted to the CORE (DOORWAY_TOP_HALF_WIDTH-wide) columns of
+     * the glass, where every row 1..DOORWAY_TOTAL_HEIGHT is glass - a
+     * true rectangular subset of the actual glass volume, rather than
+     * an approximate box that could trigger from open air. The wider
+     * flanking columns (dz = +-2) only reach DOORWAY_BOTTOM_ROWS tall,
+     * so a rectangular box spanning the full 5-wide breach could not be
+     * built without including non-glass cells at its top corners -
+     * this narrower box is glass everywhere within it, so the player is
+     * only ever teleported while genuinely standing inside the glass.
+     */
     public static Location portalCorner1(World world, FloorBounds floorBounds, int floor1OriginX, int floor1OriginZ) {
         int hubCenterX = hubCenterX(floor1OriginX);
         int hubCenterZ = hubCenterZ(floor1OriginZ);
         int maxRadius = AREA_RADIUS + BORDER_THICKNESS;
-        return new Location(world, hubCenterX + AREA_RADIUS - 4, hubFloorY(floorBounds) + 1,
+        int glassX = hubCenterX + maxRadius - 1;
+        return new Location(world, glassX, hubFloorY(floorBounds) + 1,
                 hubCenterZ - DOORWAY_TOP_HALF_WIDTH);
     }
 
-    /** Corner 2 of the portal's trigger volume - a small pocket just inside the east glass wall. */
+    /** Corner 2 of the portal's trigger volume - see portalCorner1's docs for why this stays within the glass core. */
     public static Location portalCorner2(World world, FloorBounds floorBounds, int floor1OriginX, int floor1OriginZ) {
         int hubCenterX = hubCenterX(floor1OriginX);
         int hubCenterZ = hubCenterZ(floor1OriginZ);
-        return new Location(world, hubCenterX + AREA_RADIUS - 1, hubFloorY(floorBounds) + 3,
-                hubCenterZ + DOORWAY_TOP_HALF_WIDTH);
+        int maxRadius = AREA_RADIUS + BORDER_THICKNESS;
+        int glassX = hubCenterX + maxRadius - 1;
+        // +1 on X/Z so the box's max edge reaches the far face of the
+        // glassX/+half-width block column rather than stopping at its
+        // near face, and the top of DOORWAY_TOTAL_HEIGHT's block rather
+        // than its bottom.
+        return new Location(world, glassX + 1, hubFloorY(floorBounds) + 1 + DOORWAY_TOTAL_HEIGHT,
+                hubCenterZ + DOORWAY_TOP_HALF_WIDTH + 1);
     }
 
     /**
