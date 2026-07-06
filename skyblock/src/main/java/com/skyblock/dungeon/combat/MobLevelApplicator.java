@@ -69,6 +69,24 @@ public final class MobLevelApplicator {
         int clamped = Math.max(MobLevelRoller.MIN_LEVEL, Math.min(MobLevelRoller.MAX_LEVEL, level));
         MobLevelTier tier = MobLevelTier.forLevel(clamped);
 
+        // Every dungeon mob spawns via World.spawnEntity() with
+        // SpawnReason.CUSTOM, but that alone does NOT stop vanilla's
+        // ordinary despawn behavior: LivingEntity.setRemoveWhenFarAway()
+        // defaults to true regardless of spawn reason, so any ambient
+        // room mob (or boss) left behind while a player moves on to
+        // another section of the dungeon is a candidate for instant
+        // despawn once no player is within range, and for the random
+        // "peaceful" despawn tick even before that. This is almost
+        // certainly the actual cause behind "mobs are disappearing when
+        // I leave a section of the dungeon" - not a carving/persistence
+        // bug, just vanilla despawn rules applying to mobs that were
+        // never told to opt out of them. setPersistent(true) is a
+        // belt-and-suspenders addition alongside it (guards against any
+        // other despawn/chunk-unload edge case removing an unpersisted
+        // entity from the saved chunk data).
+        entity.setRemoveWhenFarAway(false);
+        entity.setPersistent(true);
+
         tagLevel(entity, clamped);
         scaleStats(entity, clamped, extraMultiplier);
         applyTierEffects(entity, tier);

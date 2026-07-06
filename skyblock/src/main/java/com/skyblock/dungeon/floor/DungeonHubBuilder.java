@@ -105,9 +105,27 @@ public final class DungeonHubBuilder {
     private DungeonHubBuilder() {
     }
 
-    /** Area Zero's ground Y - the same walkable band as Floor 1, so the two are vertically adjacent. */
+    /**
+     * Vertical correction between Area Zero's flat hand-built floor and
+     * Floor 1's ENTRANCE room floor as the SDF cave carver actually
+     * renders it. FloorBounds.walkableFloorY(1) is only the promised
+     * "solid floor cap + SOLID_FLOOR_LAYERS" plane - but since
+     * DungeonGraphPlanner's rooms/tunnels (including the guaranteed
+     * ENTRANCE room the hub's doorway opens into) are irregular bubbly
+     * SDF blobs, not flat-floored boxes, their curved floor sits
+     * `domeH`-ish blocks below the blob's vertical center rather than
+     * pinned exactly to walkableFloorY. For the ENTRANCE room that
+     * lands its actual carved floor about 2 blocks ABOVE the hub's flat
+     * ground, leaving a step at the doorway threshold nothing can walk
+     * up (confirmed in-world: hub at y302, connecting cave floor at
+     * y304). Bumping the hub's own floor up by that same amount lines
+     * the two up so the threshold is walkable in both directions.
+     */
+    private static final int HUB_FLOOR_Y_CORRECTION = 2;
+
+    /** Area Zero's ground Y - matched to Floor 1's actual ENTRANCE room floor (see HUB_FLOOR_Y_CORRECTION). */
     private static int hubFloorY(FloorBounds floorBounds) {
-        return floorBounds.walkableFloorY(1);
+        return floorBounds.walkableFloorY(1) + HUB_FLOOR_Y_CORRECTION;
     }
 
     /** Area Zero's center sits FLOOR_0_TO_FLOOR_1_OFFSET blocks east (+X) of Floor 1's origin, same Z. */
@@ -129,16 +147,19 @@ public final class DungeonHubBuilder {
      * (unlit - see AreaZeroPortalAnimator for the flicker animation,
      * started separately once a World/plugin is available).
      *
-     * @param floor1Theme unused for Area Zero's own material palette
-     *                     (it's always forest/stone regardless of
-     *                     Floor 1's theme) but kept in the signature
-     *                     for call-site compatibility.
+     * @param floor1Theme Floor 1's theme, used for the border wall's
+     *                     material palette (see wallMaterial()) so Area
+     *                     Zero's wall reads as level-with/matching
+     *                     Floor 1's own walls instead of always being
+     *                     plain stone regardless of which floor it
+     *                     opens into.
      */
     public static void buildHub(World world, FloorBounds floorBounds, int floor1OriginX, int floor1OriginZ,
                                  FloorTheme floor1Theme) {
         int hubFloorY = hubFloorY(floorBounds);
         int hubCenterX = hubCenterX(floor1OriginX);
         int hubCenterZ = hubCenterZ(floor1OriginZ);
+        Material wallMaterial = wallMaterial(floor1Theme);
 
         // Deterministic per-rebuild seed - same shape every idempotent
         // rebuild call site (startup, and every weekly reset), matching
@@ -157,13 +178,13 @@ public final class DungeonHubBuilder {
                 if (dist <= AREA_RADIUS) {
                     buildTerrainColumn(world, hubFloorY, worldX, worldZ, x, z);
                 } else if (dist <= maxRadius) {
-                    buildBorderColumn(world, hubFloorY, worldX, worldZ);
+                    buildBorderColumn(world, hubFloorY, worldX, worldZ, wallMaterial);
                 }
             }
         }
 
         carveDoorway(world, hubFloorY, hubCenterX, hubCenterZ);           // west: open to the dungeon
-        buildPortalFrame(world, hubFloorY, hubCenterX, hubCenterZ);      // east: glass portal
+        buildPortalFrame(world, hubFloorY, hubCenterX, hubCenterZ, wallMaterial);      // east: glass portal
 
         List<int[]> treePositions = placeTrees(world, floorBounds, hubFloorY, hubCenterX, hubCenterZ, rng);
         buildPath(world, hubFloorY, hubCenterX, hubCenterZ, treePositions, rng);
@@ -191,10 +212,24 @@ public final class DungeonHubBuilder {
         }
     }
 
-    /** Border ring column: solid stone wall from just below ground to WALL_HEIGHT above it. */
-    private static void buildBorderColumn(World world, int hubFloorY, int worldX, int worldZ) {
+    /**
+     * Resolves the border wall's material from Floor 1's theme, so Area
+     * Zero's wall textures the same as the floor it opens into instead
+     * of always being plain stone regardless of theme. Falls back to
+     * BORDER_MATERIAL (stone) if no theme is supplied or the theme has
+     * no primary blocks configured.
+     */
+    private static Material wallMaterial(FloorTheme floor1Theme) {
+        if (floor1Theme == null || floor1Theme.getPrimaryBlocks().isEmpty()) {
+            return BORDER_MATERIAL;
+        }
+        return floor1Theme.getPrimaryBlocks().get(0);
+    }
+
+    /** Border ring column: solid wall from just below ground to WALL_HEIGHT above it, textured with wallMaterial. */
+    private static void buildBorderColumn(World world, int hubFloorY, int worldX, int worldZ, Material wallMaterial) {
         for (int y = hubFloorY - 3; y <= hubFloorY + WALL_HEIGHT; y++) {
-            world.getBlockAt(worldX, y, worldZ).setType(BORDER_MATERIAL, false);
+            world.getBlockAt(worldX, y, worldZ).setType(wallMaterial, false);
         }
         for (int y = hubFloorY + WALL_HEIGHT + 1; y <= hubFloorY + CLEAR_HEIGHT; y++) {
             world.getBlockAt(worldX, y, worldZ).setType(Material.AIR, false);
@@ -306,7 +341,7 @@ public final class DungeonHubBuilder {
      * clearing's edge and the glass itself - to air first, in the same
      * tapered doorway shape, before placing the glass.
      */
-    private static void buildPortalFrame(World world, int hubFloorY, int hubCenterX, int hubCenterZ) {
+    private static void buildPortalFrame(World world, int hubFloorY, int hubCenterX, int hubCenterZ, Material wallMaterial) {
         int maxRadius = AREA_RADIUS + BORDER_THICKNESS;
         int glassX = hubCenterX + maxRadius - 1; // sits within the wall band, one layer shy of the outer face
         int backerX = hubCenterX + maxRadius + 1; // one block beyond the wall's outer face
@@ -338,7 +373,7 @@ public final class DungeonHubBuilder {
         // continuous wall around the glass rather than a raw cutout.
         for (int dz = -DOORWAY_BOTTOM_HALF_WIDTH; dz <= DOORWAY_BOTTOM_HALF_WIDTH; dz++) {
             for (int row = 1; row <= DOORWAY_TOTAL_HEIGHT; row++) {
-                world.getBlockAt(backerX, hubFloorY + row, hubCenterZ + dz).setType(BORDER_MATERIAL, false);
+                world.getBlockAt(backerX, hubFloorY + row, hubCenterZ + dz).setType(wallMaterial, false);
             }
         }
         // Ground lip across the WHOLE approach (interior clearing edge

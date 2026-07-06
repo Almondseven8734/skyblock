@@ -265,6 +265,10 @@ public final class GenericBossBehavior extends MilestoneBoss {
             double angle = (2 * Math.PI / count) * i;
             Location spawnAt = entity.getLocation().clone().add(Math.cos(angle) * 2.0, 0, Math.sin(angle) * 2.0);
             Entity spawned = entity.getWorld().spawnEntity(spawnAt, type);
+            if (spawned instanceof LivingEntity livingMinion) {
+                livingMinion.setRemoveWhenFarAway(false);
+                livingMinion.setPersistent(true);
+            }
             if (spawned instanceof Zombie zombie) {
                 zombie.setBaby(false);
             }
