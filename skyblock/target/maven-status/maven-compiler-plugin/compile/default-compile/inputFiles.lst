@@ -27,6 +27,9 @@
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/classes/WeaponSkillListener.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/combat/BossArchetype.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/combat/BossArchetypeRegistry.java
+/workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/combat/DungeonBossDropDefinition.java
+/workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/combat/DungeonBossDropItemFactory.java
+/workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/combat/DungeonBossDropRegistry.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/combat/DungeonBossGateController.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/combat/ExampleMilestoneBoss.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/combat/GenericBossBehavior.java
@@ -44,6 +47,7 @@
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/drops/DungeonDropItemFactory.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/drops/DungeonDropRegistry.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/drops/DungeonMobDropListener.java
+/workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/drops/DungeonMobDropTable.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/floor/AreaZeroPortalAnimator.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/floor/BossKillTracker.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/floor/DungeonFloorManager.java
@@ -67,9 +71,12 @@
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/gen/StairBuilder.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/gen/StoneBufferGenerator.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/items/DungeonArmorSlot.java
+/workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/items/DungeonEquipmentGateListener.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/items/DungeonItemAffixes.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/items/DungeonItemGenerator.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/items/DungeonWeaponArchetype.java
+/workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/items/DungeonWeaponDurabilityListener.java
+/workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/items/DungeonWeaponShardItem.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/items/ItemAffix.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/items/ItemCombatStatsListener.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/dungeon/items/ItemLevelGateListener.java
@@ -114,6 +121,7 @@
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/kills/KillSystem.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/mine/MineSystem.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/minigames/MinigamesSystem.java
+/workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/party/PartySystem.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/protection/SpawnMobControl.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/protection/SpawnProtection.java
 /workspaces/java-server-v2/skyblock/src/main/java/com/skyblock/pwarp/PwarpSystem.java

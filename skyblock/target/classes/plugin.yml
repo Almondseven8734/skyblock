@@ -125,3 +125,7 @@ commands:
   tpdeny:
     description: Deny a pending teleport request
     usage: /tpdeny
+  party:
+    description: Manage your party - open the panel, or invite/kick/leave directly
+    usage: /party [invite <player>|kick <player>|leave]
+    aliases: [p]

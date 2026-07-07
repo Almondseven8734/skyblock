@@ -64,7 +64,20 @@ public final class DungeonItemGenerator {
     private final NamespacedKey critChanceKey;
     private final NamespacedKey archetypeKey;
     private final NamespacedKey armorSlotKey;
+    /**
+     * Tracks kills-since-last-durability-roll on a generated weapon
+     * ItemStack itself (not the player) - see
+     * DungeonWeaponDurabilityListener, which increments this on every
+     * dungeon mob kill and rolls a rarity-scaled snap chance every 50.
+     * Lives on the item so it follows the weapon through trades/AH/
+     * storage rather than being tied to whichever player is currently
+     * holding it.
+     */
+    private final NamespacedKey weaponKillsKey;
     private final Random random;
+
+    public NamespacedKey getWeaponKillsKey() { return weaponKillsKey; }
+    public NamespacedKey getArchetypeKey() { return archetypeKey; }
 
     public DungeonItemGenerator(JavaPlugin plugin, Random random) {
         this.random = random;
@@ -73,6 +86,7 @@ public final class DungeonItemGenerator {
         this.critChanceKey = new NamespacedKey(plugin, "dungeon_item_crit_chance");
         this.archetypeKey = new NamespacedKey(plugin, "dungeon_item_archetype");
         this.armorSlotKey = new NamespacedKey(plugin, "dungeon_item_armor_slot");
+        this.weaponKillsKey = new NamespacedKey(plugin, "dungeon_weapon_kills");
     }
 
     public NamespacedKey getRarityKey() { return rarityKey; }
@@ -122,10 +136,18 @@ public final class DungeonItemGenerator {
             meta.setEnchantmentGlintOverride(true);
         }
 
+        // Dungeon weapons never break from ordinary durability damage -
+        // see DungeonWeaponDurabilityListener for the separate
+        // kill-count-based snap mechanic that replaces vanilla
+        // durability entirely for these items.
+        meta.setUnbreakable(true);
+        meta.addItemFlags(ItemFlag.HIDE_UNBREAKABLE);
+
         meta.getPersistentDataContainer().set(rarityKey, PersistentDataType.STRING, rarity.name());
         meta.getPersistentDataContainer().set(requiredLevelKey, PersistentDataType.INTEGER, requiredLevel);
         meta.getPersistentDataContainer().set(critChanceKey, PersistentDataType.DOUBLE, critChance);
         meta.getPersistentDataContainer().set(archetypeKey, PersistentDataType.STRING, archetype.name());
+        meta.getPersistentDataContainer().set(weaponKillsKey, PersistentDataType.INTEGER, 0);
 
         item.setItemMeta(meta);
         return item;

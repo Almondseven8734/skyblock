@@ -43,6 +43,8 @@ import com.skyblock.vault.VaultSystem;
 
 import com.skyblock.dungeon.combat.ExampleMilestoneBoss;
 import com.skyblock.dungeon.combat.BossArchetypeRegistry;
+import com.skyblock.dungeon.combat.DungeonBossDropItemFactory;
+import com.skyblock.dungeon.combat.DungeonBossDropRegistry;
 import com.skyblock.dungeon.combat.DungeonBossGateController;
 import com.skyblock.dungeon.combat.MobLevelApplicator;
 import com.skyblock.dungeon.combat.MobLevelRoller;
@@ -332,9 +334,12 @@ public class SkyblockPlugin extends JavaPlugin {
 
             DungeonDropRegistry dungeonDropRegistry = new DungeonDropRegistry();
             DungeonDropItemFactory dungeonDropItemFactory = new DungeonDropItemFactory(this, dungeonDropRegistry);
+            DungeonBossDropRegistry dungeonBossDropRegistry = new DungeonBossDropRegistry();
+            DungeonBossDropItemFactory dungeonBossDropItemFactory = new DungeonBossDropItemFactory(this);
             DungeonMobDropListener dungeonMobDropListener = new DungeonMobDropListener(
                 dungeonMobLevelApplicator, dungeonDropRegistry, dungeonDropItemFactory,
-                new DungeonRarityRoller(dungeonRandom), dungeonItemGenerator, dungeonFloorBounds, dungeonRandom
+                new DungeonRarityRoller(dungeonRandom), dungeonItemGenerator, dungeonFloorBounds, dungeonRandom,
+                dungeonBossDropRegistry, dungeonBossDropItemFactory
             );
 
             // Chests roll a mix of real gear (weapons/armor) AND sellable
@@ -433,7 +438,8 @@ public class SkyblockPlugin extends JavaPlugin {
             );
             DungeonChestLootListener dungeonChestLootListener = new DungeonChestLootListener(
                 dungeonFloorManager::getOrCreateRoomGraph,
-                dungeonFloorBounds::floorForY
+                dungeonFloorBounds::floorForY,
+                dungeonChestPlacer
             );
 
             dungeonResetSchedulerLocal.setOnPlayerEjected(ejectedPlayer -> {
@@ -516,6 +522,33 @@ public class SkyblockPlugin extends JavaPlugin {
             pm.registerEvents(dungeonChestLootListener, this);
             pm.registerEvents(dungeonBlockProtectionListener, this);
             pm.registerEvents(dungeonNaturalSpawnGuard, this);
+
+            // Floor 0 (Area Zero) is the one place in the dungeon where
+            // mobs respawn - every other floor's mobs are placed once by
+            // DungeonRoomMobSpawner per room and never return once killed.
+            // spawnSlimes() only ever runs at startup/reset, so without
+            // this the slime count would just monotonically drain as
+            // players kill them. Reads the world via
+            // dungeonFloorManager.dungeonWorld() each run (not a captured
+            // World local) so this keeps working correctly across weekly
+            // resets, same reasoning as the admin dungeon handler below.
+            // Runs every 100 ticks (5s) - frequent enough that the
+            // population never visibly stays low for long, infrequent
+            // enough not to be wasteful.
+            getServer().getScheduler().runTaskTimer(this, () -> {
+                World liveDungeonWorld = dungeonFloorManager.dungeonWorld();
+                if (liveDungeonWorld == null) {
+                    return; // between resets - nothing to maintain right now
+                }
+                DungeonHubBuilder.maintainSlimeCount(liveDungeonWorld, dungeonFloorBounds,
+                        (int) floor1OriginX, (int) floor1OriginZ, this, dungeonMobLevelApplicator, dungeonRandom);
+                // Safety-net sweep for any non-slime mob that ended up on
+                // floor 0 through a path this guard's spawn-time check
+                // didn't catch (e.g. a mob that wandered in from another
+                // world via a bug, or was present before this plugin
+                // version was installed).
+                dungeonNaturalSpawnGuard.sweepFloor0();
+            }, 100L, 100L);
 
             // ── Admin dungeon controls ──────────────────────────────────────
             // "/admin dungeon start": kicks off generation at the Floor 1

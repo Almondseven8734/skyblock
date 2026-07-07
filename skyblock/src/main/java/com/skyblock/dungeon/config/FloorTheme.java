@@ -19,6 +19,7 @@ public final class FloorTheme {
     private final List<Material> primaryBlocks;
     private final List<Material> accentBlocks;
     private final List<EntityType> mobPool;
+    private final List<EntityType> bossPool;
     private final List<String> hazardTags;
     private final boolean isMilestoneFloor;
     private final int bossCount;
@@ -28,6 +29,7 @@ public final class FloorTheme {
                        List<Material> primaryBlocks,
                        List<Material> accentBlocks,
                        List<EntityType> mobPool,
+                       List<EntityType> bossPool,
                        List<String> hazardTags,
                        boolean isMilestoneFloor,
                        int bossCount) {
@@ -39,6 +41,7 @@ public final class FloorTheme {
         this.primaryBlocks = List.copyOf(primaryBlocks);
         this.accentBlocks = List.copyOf(accentBlocks);
         this.mobPool = List.copyOf(mobPool);
+        this.bossPool = List.copyOf(bossPool);
         this.hazardTags = List.copyOf(hazardTags);
         this.isMilestoneFloor = isMilestoneFloor;
         this.bossCount = bossCount;
@@ -62,6 +65,18 @@ public final class FloorTheme {
 
     public List<EntityType> getMobPool() {
         return mobPool;
+    }
+
+    /**
+     * The pool a floor's boss room trigger rolls its boss's base
+     * EntityType from - a curated, boss-worthy subset of the floor's
+     * ambient mobPool (trash mobs like bats/silverfish are excluded).
+     * Rolled fresh (randomly) every time a boss room triggers, so a
+     * floor's boss varies across dungeon resets instead of always
+     * being the exact same mob type every single week.
+     */
+    public List<EntityType> getBossPool() {
+        return bossPool;
     }
 
     public List<String> getHazardTags() {

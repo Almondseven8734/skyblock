@@ -239,13 +239,28 @@ public final class DungeonBossRoomTrigger {
         }
     }
 
-    /** Picks the strongest-looking entry in the floor's mob pool to stand in as the buffed-vanilla boss. */
+    /**
+     * Rolls a random entry from the floor's curated boss pool.
+     *
+     * Previously this always returned pool.get(pool.size() - 1) off the
+     * floor's *ambient* mobPool - since mobPool is a fixed, hand-authored
+     * list per depth band, that meant every single floor's boss was one
+     * specific, deterministic mob type, every dungeon reset, forever (and
+     * "strongest" was just an assumption about list ordering that wasn't
+     * even true - e.g. floor 1-4's list ends in ZOMBIE_VILLAGER, not
+     * something meaningfully stronger than the zombie/spider earlier in
+     * the same list). Rolling randomly from FloorTheme's dedicated
+     * bossPool (a hand-curated, boss-worthy subset that excludes trash
+     * mobs like bats/silverfish) fixes both problems at once: the boss now
+     * varies across resets, and it's always drawn from mobs that actually
+     * read as boss material.
+     */
     private EntityType pickBossEntityType(FloorTheme theme) {
-        List<EntityType> pool = theme.getMobPool();
+        List<EntityType> pool = theme.getBossPool();
         if (pool.isEmpty()) {
             return EntityType.ZOMBIE;
         }
-        return pool.get(pool.size() - 1);
+        return pool.get(random.nextInt(pool.size()));
     }
 
     /**

@@ -57,8 +57,27 @@ public final class DungeonDropRegistry {
 
     private final Map<String, DungeonDropDefinition> byId = new LinkedHashMap<>();
     private final Map<DungeonRarity, List<DungeonDropDefinition>> byRarity = new EnumMap<>(DungeonRarity.class);
+    private final DungeonMobDropTable mobDropTable;
 
     public DungeonDropRegistry() {
+        this(new DungeonMobDropTable());
+    }
+
+    /**
+     * @param mobDropTable the 100-entry mob-specific catalog (20 types x 5
+     *                     drops) folded into this registry's id lookup so
+     *                     resolve()/get() work for both generic
+     *                     ("<rarity>_<noun>_<adjective>") and mob-specific
+     *                     ("mobdrop_<type>_<slug>") ids through the same
+     *                     guild-merchant sell path - callers don't need to
+     *                     know which catalog an id came from.
+     */
+    public DungeonDropRegistry(DungeonMobDropTable mobDropTable) {
+        this.mobDropTable = mobDropTable;
+        for (DungeonDropDefinition mobDrop : mobDropTable.all()) {
+            byId.put(mobDrop.getId(), mobDrop);
+            byRarity.computeIfAbsent(mobDrop.getRarity(), r -> new ArrayList<>()).add(mobDrop);
+        }
         for (DungeonRarity rarity : DungeonRarity.values()) {
             List<DungeonDropDefinition> forRarity = new ArrayList<>();
             int basePrice = BASE_PRICE.get(rarity);
@@ -83,8 +102,14 @@ public final class DungeonDropRegistry {
         return byId.get(id);
     }
 
+    /** Generic-catalog-only rarity pool (unchanged behavior) - used by DungeonMobDropListener's fallback roll. */
     public List<DungeonDropDefinition> forRarity(DungeonRarity rarity) {
         return byRarity.get(rarity);
+    }
+
+    /** The mob-specific drop table folded into this registry, exposed so DungeonMobDropListener can roll from it directly. */
+    public DungeonMobDropTable getMobDropTable() {
+        return mobDropTable;
     }
 
     public int size() {

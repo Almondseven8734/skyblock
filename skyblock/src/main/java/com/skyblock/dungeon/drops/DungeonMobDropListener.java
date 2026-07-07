@@ -1,5 +1,8 @@
 package com.skyblock.dungeon.drops;
 
+import com.skyblock.dungeon.combat.DungeonBossDropDefinition;
+import com.skyblock.dungeon.combat.DungeonBossDropItemFactory;
+import com.skyblock.dungeon.combat.DungeonBossDropRegistry;
 import com.skyblock.dungeon.combat.MobLevelApplicator;
 import com.skyblock.dungeon.items.DungeonItemGenerator;
 import com.skyblock.dungeon.loot.DungeonRarity;
@@ -49,10 +52,14 @@ public final class DungeonMobDropListener implements Listener {
     private final DungeonItemGenerator itemGenerator;
     private final FloorBounds floorBounds;
     private final Random random;
+    private final DungeonBossDropRegistry bossDropRegistry;
+    private final DungeonBossDropItemFactory bossDropItemFactory;
 
     public DungeonMobDropListener(MobLevelApplicator levelApplicator, DungeonDropRegistry dropRegistry,
                                    DungeonDropItemFactory dropItemFactory, DungeonRarityRoller rarityRoller,
-                                   DungeonItemGenerator itemGenerator, FloorBounds floorBounds, Random random) {
+                                   DungeonItemGenerator itemGenerator, FloorBounds floorBounds, Random random,
+                                   DungeonBossDropRegistry bossDropRegistry,
+                                   DungeonBossDropItemFactory bossDropItemFactory) {
         this.levelApplicator = levelApplicator;
         this.dropRegistry = dropRegistry;
         this.dropItemFactory = dropItemFactory;
@@ -60,6 +67,8 @@ public final class DungeonMobDropListener implements Listener {
         this.itemGenerator = itemGenerator;
         this.floorBounds = floorBounds;
         this.random = random;
+        this.bossDropRegistry = bossDropRegistry;
+        this.bossDropItemFactory = bossDropItemFactory;
     }
 
     @EventHandler
@@ -115,6 +124,17 @@ public final class DungeonMobDropListener implements Listener {
                     ? itemGenerator.generateRandomWeapon(gearRarity)
                     : itemGenerator.generateRandomArmor(gearRarity);
             victim.getWorld().dropItemNaturally(victim.getLocation(), gear);
+        }
+
+        // Every boss drops its own unique, flavor-matched trophy item on
+        // top of the gear/sellable rolls above - guaranteed, not chance-
+        // based, since it's meant to be a "you definitely beat this boss"
+        // keepsake rather than another loot roll. Ambient (non-boss) mobs
+        // never drop a trophy.
+        if (boss) {
+            DungeonBossDropDefinition trophyDef = bossDropRegistry.get(victim.getType());
+            ItemStack trophy = bossDropItemFactory.build(trophyDef);
+            victim.getWorld().dropItemNaturally(victim.getLocation(), trophy);
         }
     }
 }

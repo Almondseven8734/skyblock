@@ -24,8 +24,12 @@ import java.util.Random;
  */
 public final class AreaZeroPortalAnimator {
 
-    private static final Material COLOR_A = Material.BLUE_STAINED_GLASS;
-    private static final Material COLOR_B = Material.PURPLE_STAINED_GLASS;
+    // Must match DungeonHubBuilder's PORTAL_COLOR_A/B exactly - the
+    // portal is built out of panes, not full glass blocks, so the
+    // flicker has to flip between the same pane variants or it'd
+    // silently swap each flickered cell over to solid glass blocks.
+    private static final Material COLOR_A = Material.BLUE_STAINED_GLASS_PANE;
+    private static final Material COLOR_B = Material.PURPLE_STAINED_GLASS_PANE;
 
     /** Per-block cycle length range, in ticks - short enough to read as "flickering", not a slow fade. */
     private static final int MIN_PERIOD_TICKS = 15;

@@ -35,10 +35,10 @@ import org.bukkit.event.block.BlockPlaceEvent;
  * a reset, or this listener keeps comparing against the old, unloaded
  * World forever and silently stops protecting anything.
  *
- * Chest breaking is intentionally left alone here: DungeonChestLootListener
- * already listens to the same BlockBreakEvent to mark chest rooms as
+ * Loot barrel breaking is intentionally left alone here: DungeonChestLootListener
+ * already listens to the same BlockBreakEvent to mark loot rooms as
  * looted, and still fires that bookkeeping even when this listener
- * cancels the physical break, so chests remain track-able as "looted"
+ * cancels the physical break, so barrels remain track-able as "looted"
  * either by breaking or by emptying them via the inventory.
  */
 public final class DungeonBlockProtectionListener implements Listener {

@@ -93,14 +93,15 @@ public final class DungeonHubBuilder {
     /** Max lateral (Z) deflection allowed per step of X while steering. */
     private static final double PATH_MAX_STEP_DEFLECTION = 0.6;
 
-    // Deliberately sparser than a flat density-scale-up from the old R25
-    // clearing would give (that math worked out to 160-256 trees, which
-    // read as overcrowded/cluttered across the full R100 clearing) - these
-    // large multi-branch trees (see buildTree()) read as "big" individually,
-    // so far fewer of them are needed for the clearing to feel forested
-    // rather than packed.
-    private static final int MIN_TREES = 45;
-    private static final int MAX_TREES = 75;
+    // Raised from the original 45-75 (which, spread across the full R100
+    // clearing, left large visibly empty gaps between trees) so the
+    // forest actually fills the space out to the border ring instead of
+    // reading as a sparse handful of trees in an otherwise-empty field.
+    private static final int MIN_TREES = 90;
+    private static final int MAX_TREES = 140;
+
+    /** Uniform size-up applied to every tree dimension (trunk height, root/limb length, leaf radius): +30%. */
+    private static final double TREE_SCALE = 1.3;
 
     private DungeonHubBuilder() {
     }
@@ -442,14 +443,21 @@ public final class DungeonHubBuilder {
         List<int[]> placedAt = new ArrayList<>();
 
         int attempts = 0;
-        int maxAttempts = treeCount * 20;
+        // Raised alongside treeCount (and the tighter min-spacing below)
+        // so a denser forest still reliably finds enough valid spots
+        // before giving up.
+        int maxAttempts = treeCount * 40;
         while (placedAt.size() < treeCount && attempts < maxAttempts) {
             attempts++;
             double angle = rng.nextDouble() * Math.PI * 2;
             // Keep trees well clear of the wall ring and the two doorway
             // approach lanes (a band around hubCenterZ on both the west
             // and east extremes), so nothing blocks either opening.
-            double r = 4 + rng.nextDouble() * (AREA_RADIUS - 8);
+            // Sampled almost out to the border ring itself (only 3 clear
+            // instead of 8) so the forest reaches all the way to the
+            // edges of the clearing rather than leaving an empty band
+            // just inside the wall.
+            double r = 4 + rng.nextDouble() * (AREA_RADIUS - 3);
             int x = (int) Math.round(Math.cos(angle) * r);
             int z = (int) Math.round(Math.sin(angle) * r);
 
@@ -459,9 +467,14 @@ public final class DungeonHubBuilder {
                 continue;
             }
 
+            // Min spacing tightened from 7 to 6: the trees are now 30%
+            // larger (see TREE_SCALE) with wider canopies, but the
+            // higher MIN_TREES/MAX_TREES density needs the closer
+            // packing allowance to actually fit and fill the clearing
+            // rather than starving out on tooClose rejections.
             boolean tooClose = false;
             for (int[] other : placedAt) {
-                if (Math.hypot(x - other[0], z - other[1]) < 7) {
+                if (Math.hypot(x - other[0], z - other[1]) < 6) {
                     tooClose = true;
                     break;
                 }
@@ -487,7 +500,8 @@ public final class DungeonHubBuilder {
      * vanilla scale/shape (thin single-log trunk, short stubby limbs).
      */
     private static void buildTree(World world, int baseX, int baseY, int baseZ, Random rng) {
-        int trunkHeight = 8 + rng.nextInt(7); // 8-14, tall
+        // Base 8-14 range scaled up 30% (TREE_SCALE) -> ~10-18 tall.
+        int trunkHeight = (int) Math.round((8 + rng.nextInt(7)) * TREE_SCALE);
 
         // Root flares: short log stubs radiating outward along the
         // ground from the base before the trunk rises, reading as
@@ -495,7 +509,8 @@ public final class DungeonHubBuilder {
         int rootCount = 4 + rng.nextInt(3); // 4-6
         for (int i = 0; i < rootCount; i++) {
             double angle = (Math.PI * 2 * i / rootCount) + (rng.nextDouble() - 0.5) * 0.6;
-            int rootLength = 2 + rng.nextInt(3); // 2-4
+            // Base 2-4 range scaled up 30% -> ~3-5.
+            int rootLength = (int) Math.round((2 + rng.nextInt(3)) * TREE_SCALE);
             double dx = Math.cos(angle);
             double dz = Math.sin(angle);
             double x = baseX;
@@ -523,7 +538,8 @@ public final class DungeonHubBuilder {
                 world.getBlockAt(baseX + 1, baseY + dy, baseZ + 1).setType(TRUNK_MATERIAL, false);
             }
         }
-        leafCluster(world, baseX, baseY + trunkHeight, baseZ, 3);
+        // Base radius 3 scaled up 30% -> ~4.
+        leafCluster(world, baseX, baseY + trunkHeight, baseZ, (int) Math.round(3 * TREE_SCALE));
 
         // Large branches: thick (2-log-wide cross-section), long,
         // sweeping limbs starting partway up the trunk, each capped
@@ -532,7 +548,8 @@ public final class DungeonHubBuilder {
         for (int i = 0; i < limbCount; i++) {
             int startY = baseY + Math.max(2, (int) (trunkHeight * (0.35 + rng.nextDouble() * 0.4)));
             double angle = rng.nextDouble() * Math.PI * 2;
-            int limbLength = 5 + rng.nextInt(5); // 5-9, large sweeping branches
+            // Base 5-9 range scaled up 30% -> ~7-12, large sweeping branches.
+            int limbLength = (int) Math.round((5 + rng.nextInt(5)) * TREE_SCALE);
 
             double x = baseX;
             double y = startY;
@@ -560,7 +577,8 @@ public final class DungeonHubBuilder {
                             .setType(TRUNK_MATERIAL, false);
                 }
             }
-            leafCluster(world, (int) Math.round(x), (int) Math.round(y), (int) Math.round(z), 3);
+            leafCluster(world, (int) Math.round(x), (int) Math.round(y), (int) Math.round(z),
+                    (int) Math.round(3 * TREE_SCALE));
         }
     }
 
@@ -661,14 +679,20 @@ public final class DungeonHubBuilder {
     }
 
     /**
-     * Spawns MIN_SLIMES..MAX_SLIMES level 1-2 medium slimes into Area Zero's
-     * clearing. Called separately from buildHub() (it needs a
+     * Full refill of Area Zero's slime population to exactly
+     * SLIME_TARGET_COUNT. Called separately from buildHub() (it needs a
      * JavaPlugin + MobLevelApplicator that aren't available at the
      * point buildHub() first runs during plugin startup) but on the
      * exact same call sites/timing - once at startup, once per weekly
      * reset. Idempotent: clears any Area-Zero-tagged slimes already in
      * the clearing first, so repeated calls (e.g. a restart without an
      * intervening reset) don't stack up duplicates.
+     *
+     * This is a one-shot full clear+refill, appropriate for
+     * startup/reset. For keeping the count steady at 150 during
+     * ongoing play as players kill slimes, see maintainSlimeCount()
+     * instead - that one only tops up the shortfall rather than
+     * clearing survivors.
      */
     public static void spawnSlimes(World world, FloorBounds floorBounds, int floor1OriginX, int floor1OriginZ,
                                     org.bukkit.plugin.java.JavaPlugin plugin,
@@ -678,26 +702,134 @@ public final class DungeonHubBuilder {
         int hubCenterX = hubCenterX(floor1OriginX);
         int hubCenterZ = hubCenterZ(floor1OriginZ);
 
+        // MUST happen before any getNearbyEntities() call below (both
+        // here and in every maintainSlimeCount() tick) - see
+        // ensureHubChunksLoaded()'s doc for why: without this, an
+        // unloaded hub region makes the "clear existing slimes" pass
+        // below silently find nothing to remove, so a restart/relog
+        // stacks a fresh 150 on top of whatever was already saved
+        // there instead of replacing it. This was the actual cause of
+        // "thousands of slimes spawning every relog, crashing the
+        // server."
+        ensureHubChunksLoaded(world, hubCenterX, hubCenterZ, plugin);
+
         org.bukkit.NamespacedKey tagKey = new org.bukkit.NamespacedKey(plugin, "area_zero_slime");
 
         // Clear any previously spawned Area Zero slimes before spawning
         // fresh ones, so a restart (buildHub/spawnSlimes called again
         // without a world-deleting reset in between) doesn't pile up
         // duplicates over time.
-        double clearRadius = AREA_RADIUS + BORDER_THICKNESS + 2;
-        for (org.bukkit.entity.Entity entity : world.getNearbyEntities(
-                new Location(world, hubCenterX, hubFloorY + 4, hubCenterZ), clearRadius, 20, clearRadius)) {
+        for (org.bukkit.entity.Entity entity : nearbyHubEntities(world, hubCenterX, hubFloorY, hubCenterZ)) {
             if (entity instanceof org.bukkit.entity.Slime
                     && entity.getPersistentDataContainer().has(tagKey, org.bukkit.persistence.PersistentDataType.BYTE)) {
                 entity.remove();
             }
         }
 
-        int slimeCount = MIN_SLIMES + random.nextInt(MAX_SLIMES - MIN_SLIMES + 1);
+        spawnSlimeBatch(world, hubFloorY, hubCenterX, hubCenterZ, tagKey, levelApplicator, random,
+                SLIME_TARGET_COUNT);
+    }
+
+    /**
+     * Tops up Area Zero's slime population back to SLIME_TARGET_COUNT
+     * without touching any slime that's still alive - unlike
+     * spawnSlimes() (a full clear+refill meant for startup/reset), this
+     * is meant to be called repeatedly on a timer during ongoing play
+     * (see SkyblockPlugin's slime-upkeep task) so that killing slimes
+     * in Area Zero doesn't slowly drain the population: floor 0 is the
+     * one place in the dungeon where mobs are meant to respawn, since
+     * every other floor's mobs are placed once by DungeonRoomMobSpawner
+     * per room and never come back once killed.
+     */
+    public static void maintainSlimeCount(World world, FloorBounds floorBounds, int floor1OriginX, int floor1OriginZ,
+                                           org.bukkit.plugin.java.JavaPlugin plugin,
+                                           com.skyblock.dungeon.combat.MobLevelApplicator levelApplicator,
+                                           Random random) {
+        int hubFloorY = hubFloorY(floorBounds);
+        int hubCenterX = hubCenterX(floor1OriginX);
+        int hubCenterZ = hubCenterZ(floor1OriginZ);
+
+        // Same reason as in spawnSlimes(): this runs every 5s forever,
+        // and without a standing chunk ticket the hub region unloads
+        // whenever no player is physically standing in it, which would
+        // make the count below silently read 0 and top up a full 150
+        // on top of the untouched-but-invisible existing population.
+        // addPluginChunkTicket() is a cheap no-op once a ticket is
+        // already held, so calling this every tick is fine.
+        ensureHubChunksLoaded(world, hubCenterX, hubCenterZ, plugin);
+
+        org.bukkit.NamespacedKey tagKey = new org.bukkit.NamespacedKey(plugin, "area_zero_slime");
+
+        int currentCount = 0;
+        for (org.bukkit.entity.Entity entity : nearbyHubEntities(world, hubCenterX, hubFloorY, hubCenterZ)) {
+            if (entity instanceof org.bukkit.entity.Slime
+                    && entity.getPersistentDataContainer().has(tagKey, org.bukkit.persistence.PersistentDataType.BYTE)) {
+                currentCount++;
+            }
+        }
+
+        int shortfall = SLIME_TARGET_COUNT - currentCount;
+        if (shortfall <= 0) {
+            return; // already at (or somehow above) the target - nothing to do
+        }
+
+        spawnSlimeBatch(world, hubFloorY, hubCenterX, hubCenterZ, tagKey, levelApplicator, random, shortfall);
+    }
+
+    /**
+     * Forces every chunk covering Area Zero's clearing + border ring to
+     * load and stay loaded (via a plugin chunk ticket) for as long as
+     * this plugin is enabled, regardless of whether a player is
+     * physically standing there.
+     *
+     * This is the fix for a real bug: World.getNearbyEntities() (used
+     * by both spawnSlimes()'s clear step and maintainSlimeCount()'s
+     * count step) only ever sees entities in chunks that are currently
+     * loaded. Floor 0 has no player-independent reason to stay loaded
+     * on its own, so any time everyone's elsewhere (server just
+     * (re)started, everyone's deeper in the dungeon, etc.) those chunks
+     * unload - and the very next count/clear pass then sees zero
+     * existing slimes even though ~150 tagged ones are sitting there
+     * saved to disk. spawnSlimes() would then spawn a full fresh batch
+     * on top instead of replacing them, and maintainSlimeCount() (every
+     * 5s) would do the same thing repeatedly - compounding into
+     * thousands of slimes that all become simultaneously active the
+     * moment the chunks finally do load (e.g. a player walks in),
+     * which is exactly what was crashing the server on relog.
+     * addPluginChunkTicket is idempotent per (chunk, plugin) pair, so
+     * calling this on every maintainSlimeCount() tick is cheap.
+     */
+    private static void ensureHubChunksLoaded(World world, int hubCenterX, int hubCenterZ,
+                                                org.bukkit.plugin.Plugin plugin) {
+        int maxRadius = AREA_RADIUS + BORDER_THICKNESS;
+        int minChunkX = (hubCenterX - maxRadius) >> 4;
+        int maxChunkX = (hubCenterX + maxRadius) >> 4;
+        int minChunkZ = (hubCenterZ - maxRadius) >> 4;
+        int maxChunkZ = (hubCenterZ + maxRadius) >> 4;
+        for (int cx = minChunkX; cx <= maxChunkX; cx++) {
+            for (int cz = minChunkZ; cz <= maxChunkZ; cz++) {
+                world.addPluginChunkTicket(cx, cz, plugin);
+            }
+        }
+    }
+
+    /** All entities within Area Zero's clearing radius, for tag-checking by callers. */
+    private static java.util.Collection<org.bukkit.entity.Entity> nearbyHubEntities(World world, int hubCenterX,
+                                                                                 int hubFloorY, int hubCenterZ) {
+        double clearRadius = AREA_RADIUS + BORDER_THICKNESS + 2;
+        return world.getNearbyEntities(
+                new Location(world, hubCenterX, hubFloorY + 4, hubCenterZ), clearRadius, 20, clearRadius);
+    }
+
+    /** Spawns up to `count` new tagged, leveled Area Zero slimes at random open points in the clearing. */
+    private static void spawnSlimeBatch(World world, int hubFloorY, int hubCenterX, int hubCenterZ,
+                                         org.bukkit.NamespacedKey tagKey,
+                                         com.skyblock.dungeon.combat.MobLevelApplicator levelApplicator,
+                                         Random random, int count) {
         int attempts = 0;
-        int maxAttempts = slimeCount * 20;
+        int maxAttempts = Math.max(1, count) * 20;
         int spawned = 0;
-        while (spawned < slimeCount && attempts < maxAttempts) {
+        while (spawned < count && attempts < maxAttempts) {
             attempts++;
             double angle = random.nextDouble() * Math.PI * 2;
             double r = 3 + random.nextDouble() * (AREA_RADIUS - 6);
@@ -727,10 +859,14 @@ public final class DungeonHubBuilder {
         }
     }
 
-    // 10x the original 4-7 range, per design change to make Area Zero
-    // feel busier with slimes.
-    private static final int MIN_SLIMES = 40;
-    private static final int MAX_SLIMES = 70;
+    /**
+     * Floor 0 (Area Zero) is the only place in the dungeon where mobs
+     * respawn, and it always maintains exactly this many slimes -
+     * previously a random 40-70 spawned once at build/reset time with
+     * no upkeep afterward, so the population only ever went down as
+     * players killed them. See maintainSlimeCount().
+     */
+    private static final int SLIME_TARGET_COUNT = 150;
 
     /** The location players should be teleported to on /dungeon - the center of Area Zero's clearing. */
     public static Location entranceLocation(World world, FloorBounds floorBounds, int floor1OriginX, int floor1OriginZ) {
